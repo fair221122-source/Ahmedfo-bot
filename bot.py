@@ -39,53 +39,20 @@ SYMBOLS = [
 
 # جلب الشموع من TwelveData
 def get_candles(symbol):
-    intervals = ["1min", "3min", "5min"]  # جرب 3 فواصل زمنية
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&outputsize=40&apikey={API_KEY}"
+    r = requests.get(url).json()
 
-    for interval in intervals:
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=10&apikey={API_KEY}"
+    if "values" not in r:
+        return None
 
-        print("Trying:", symbol, interval)
+    df = pd.DataFrame(r["values"])
+    df["open"] = df["open"].astype(float)
+    df["close"] = df["close"].astype(float)
+    df["high"] = df["high"].astype(float)
+    df["low"] = df["low"].astype(float)
 
-        try:
-            r = requests.get(url, timeout=5).json()
-        except Exception as e:
-            print("Request error:", e)
-            continue
-
-        # لو API رجع خطأ
-        if "status" in r and r["status"] == "error":
-            print("API Error:", r.get("message"))
-            continue
-
-        # لو ما فيه values
-        if "values" not in r:
-            print("No values key for", symbol, interval)
-            continue
-
-        # لو values فاضية
-        if not r["values"]:
-            print("Empty values for", symbol, interval)
-            continue
-
-        # تحويل البيانات
-        df = pd.DataFrame(r["values"])
-        df["open"] = df["open"].astype(float)
-        df["close"] = df["close"].astype(float)
-        df["high"] = df["high"].astype(float)
-        df["low"] = df["low"].astype(float)
-
-        df = df.iloc[::-1]  # ترتيب الشموع
-
-        print("SUCCESS:", symbol, "using", interval)
-        return df
-
-    print("FAILED:", symbol)
-    return None
-        print(f"{symbol} using interval {interval}")
-        return df
-
-    print(f"{symbol} => no interval worked")
-    return None
+    df = df.iloc[::-1]  # ترتيب الشموع من الأقدم للأحدث
+    return df
 
 # EMA20
 def ema20(series):
@@ -183,10 +150,11 @@ def handle(message):
 
 print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
 
+import threading
+
 def run_bot():
     bot.infinity_polling()
 
 bot_thread = threading.Thread(target=run_bot)
 bot_thread.start()
-
 app.run(host="0.0.0.0", port=10000)
