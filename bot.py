@@ -150,3 +150,10 @@ def handle(message):
 
 print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
 bot.infinity_polling(skip_pending=True)
+import threading
+
+def run_bot():
+    bot.infinity_polling()
+
+bot_thread = threading.Thread(target=run_bot)
+bot_thread.start()
