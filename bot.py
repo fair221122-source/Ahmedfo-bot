@@ -26,8 +26,6 @@ API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
 # ============================
 
 SYMBOLS = [
-    "AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD",
-SYMBOLS = [
     "EUR/USD",
     "GBP/USD",
     "USD/JPY",
