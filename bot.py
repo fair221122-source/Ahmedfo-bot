@@ -40,7 +40,16 @@ SYMBOLS = [
 # جلب الشموع من TwelveData
 def get_candles(symbol):
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&outputsize=40&apikey={API_KEY}"
-    r = requests.get(url).json()
+    
+    # ============================
+    # حماية API — منع سقوط البوت
+    # ============================
+    try:
+        r = requests.get(url, timeout=5).json()
+    except Exception as e:
+        print("API Error:", e)
+        return None
+    # ============================
 
     if "values" not in r:
         return None
@@ -150,11 +159,10 @@ def handle(message):
 
 print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
 
-import threading
-
 def run_bot():
     bot.infinity_polling()
 
 bot_thread = threading.Thread(target=run_bot)
 bot_thread.start()
+
 app.run(host="0.0.0.0", port=10000)
