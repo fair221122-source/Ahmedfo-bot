@@ -42,7 +42,7 @@ def get_candles(symbol):
     intervals = ["1min", "3min", "5min"]  # جرب 3 فواصل زمنية
 
     for interval in intervals:
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=40&apikey={API_KEY}"
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=10&apikey={API_KEY}"
 
         try:
             r = requests.get(url, timeout=5).json()
@@ -51,6 +51,7 @@ def get_candles(symbol):
             continue
 
         if "values" not in r:
+            print(f"{symbol} ({interval}) => no values")
             continue
 
         df = pd.DataFrame(r["values"])
@@ -60,10 +61,11 @@ def get_candles(symbol):
         df["low"] = df["low"].astype(float)
 
         df = df.iloc[::-1]  # ترتيب الشموع
-        print(f"{symbol} using interval {interval}")  # لمعرفة أي فاصل اشتغل
+        print(f"{symbol} using interval {interval}")
         return df
 
-    return None  # لو ما لقى أي فاصل
+    print(f"{symbol} => no interval worked")
+    return None
 
 # EMA20
 def ema20(series):
