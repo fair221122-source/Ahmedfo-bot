@@ -28,13 +28,12 @@ API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
 
 # جميع الأزواج الأصلية بصيغة TwelveData
 SYMBOLS = [
-    "EUR/USD",
-    "GBP/USD",
-    "USD/JPY",
-    "AUD/USD",
-    "USD/CHF",
-    "USD/CAD",
-    "NZD/USD",
+    "AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD",
+    "CAD/CHF","CAD/JPY","CHF/JPY",
+    "EUR/CAD","EUR/CHF","EUR/GBP","EUR/JPY","EUR/USD",
+    "GBP/AUD","GBP/CAD","GBP/CHF","GBP/JPY","GBP/NZD","GBP/USD",
+    "NZD/CAD","NZD/CHF","NZD/JPY","NZD/USD",
+    "USD/CAD","USD/CHF","USD/JPY",
     "XAU/USD"
 ]
 
