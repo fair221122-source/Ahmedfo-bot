@@ -136,4 +136,4 @@ def handle(message):
     bot.send_message(message.chat.id, final_text)
 
 print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
