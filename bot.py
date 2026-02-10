@@ -39,29 +39,31 @@ SYMBOLS = [
 
 # جلب الشموع من TwelveData
 def get_candles(symbol):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&outputsize=40&apikey={API_KEY}"
-    
-    # ============================
-    # حماية API — منع سقوط البوت
-    # ============================
-    try:
-        r = requests.get(url, timeout=5).json()
-    except Exception as e:
-        print("API Error:", e)
-        return None
-    # ============================
+    intervals = ["1min", "3min", "5min"]  # جرب 3 فواصل زمنية
 
-    if "values" not in r:
-        return None
+    for interval in intervals:
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=40&apikey={API_KEY}"
 
-    df = pd.DataFrame(r["values"])
-    df["open"] = df["open"].astype(float)
-    df["close"] = df["close"].astype(float)
-    df["high"] = df["high"].astype(float)
-    df["low"] = df["low"].astype(float)
+        try:
+            r = requests.get(url, timeout=5).json()
+        except Exception as e:
+            print(f"API Error for {symbol} ({interval}):", e)
+            continue
 
-    df = df.iloc[::-1]  # ترتيب الشموع من الأقدم للأحدث
-    return df
+        if "values" not in r:
+            continue
+
+        df = pd.DataFrame(r["values"])
+        df["open"] = df["open"].astype(float)
+        df["close"] = df["close"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+
+        df = df.iloc[::-1]  # ترتيب الشموع
+        print(f"{symbol} using interval {interval}")  # لمعرفة أي فاصل اشتغل
+        return df
+
+    return None  # لو ما لقى أي فاصل
 
 # EMA20
 def ema20(series):
