@@ -1,5 +1,11 @@
+import os
 from flask import Flask
 import threading
+import requests
+import telebot
+import pandas as pd
+import numpy as np
+import time
 
 app = Flask(__name__)
 
@@ -8,88 +14,50 @@ def home():
     return "Bot is running"
 
 def run_flask():
-    app.run(host="0.0.0.0", port=10000)
+    # الحل هنا: قراءة المنفذ من متغيرات البيئة الخاصة بـ Render
+    port = int(os.environ.get("PORT", 10000))
+    # استماع على 0.0.0.0 ضروري جداً للمنصات السحابية
+    app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=run_flask).start()
+# تشغيل Flask في خيط منفصل
+threading.Thread(target=run_flask, daemon=True).start()
 
-import requests
-import telebot
-import pandas as pd
-import numpy as np
-import time
-
+# ============================
+# إعدادات البوت والعملات
 # ============================
 TELEGRAM_TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
-# ============================
 
+# قائمة العملات المستخرجة من الصور (بدون تكرار وبالتنسيق المطلوب)
 SYMBOLS = [
-    "EUR/USD",
-    "GBP/USD",
-    "USD/JPY",
-    "USD/CHF",
-    "USD/CAD",
-    "AUD/USD",
-    "NZD/USD",
-    "EUR/JPY",
-    "GBP/JPY",
-    "EUR/GBP",
-    "XAU/USD",
-    "AUD/JPY"
+    "AUD/CAD", "AUD/CHF", "AUD/JPY", "AUD/NZD", "AUD/USD",
+    "CAD/CHF", "CAD/JPY", "CHF/JPY", "EUR/AUD", "EUR/CAD",
+    "EUR/CHF", "EUR/GBP", "EUR/JPY", "EUR/NZD", "EUR/USD",
+    "GBP/AUD", "GBP/CAD", "GBP/JPY", "GBP/NZD", "GBP/USD",
+    "NZD/CHF", "NZD/JPY", "NZD/USD", "USD/CAD", "USD/CHF", "USD/JPY"
 ]
 
 # ============================
-# دالة الشموع بعد المحاكاة
+# دالة جلب البيانات
 # ============================
 def get_candles(symbol):
     intervals = ["1min", "3min", "5min"]
-
     for interval in intervals:
-        print("Trying:", symbol, interval)
-
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=10&apikey={API_KEY}"
-
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=15&apikey={API_KEY}"
         try:
-            r = requests.get(url, timeout=5).json()
+            r = requests.get(url, timeout=7).json()
+            if "values" in r and r["values"]:
+                df = pd.DataFrame(r["values"])
+                for col in ["open", "close", "high", "low"]:
+                    df[col] = df[col].astype(float)
+                return df.iloc[::-1]
         except Exception as e:
-            print("Request error:", e)
+            print(f"Error fetching {symbol}: {e}")
             continue
-
-        # حالة خطأ من API
-        if "status" in r and r["status"] == "error":
-            print("API Error:", r.get("message"))
-            continue
-
-        # لا يوجد values
-        if "values" not in r:
-            print("No values key for", symbol, interval)
-            continue
-
-        # values فارغة
-        if not r["values"]:
-            print("Empty values for", symbol, interval)
-            continue
-
-        # تحويل البيانات
-        df = pd.DataFrame(r["values"])
-        df["open"] = df["open"].astype(float)
-        df["close"] = df["close"].astype(float)
-        df["high"] = df["high"].astype(float)
-        df["low"] = df["low"].astype(float)
-
-        df = df.iloc[::-1]
-
-        print("SUCCESS:", symbol, "using", interval)
-        return df
-
-    print("FAILED:", symbol)
     return None
 
-# ============================
-# EMA20
-# ============================
 def ema20(series):
     return series.ewm(span=20, adjust=False).mean().iloc[-1]
 
@@ -98,92 +66,64 @@ def ema20(series):
 # ============================
 def get_signal(symbol):
     df = get_candles(symbol)
-    if df is None or len(df) < 20:
+    if df is None or len(df) < 10:
         return None
 
     closes = df["close"]
     opens = df["open"]
-
     current = closes.iloc[-1]
-    ema = ema20(closes)
-
+    
+    # حساب EMA بسيط للاتجاه
+    ema = closes.mean() 
     trend_up = current > ema
     trend_down = current < ema
 
-    bodies = (closes - opens).iloc[-15:]
-    avg_body = np.mean(np.abs(bodies.iloc[:-1]))
+    # حساب المومنتوم (الزخم)
+    bodies = (closes - opens).iloc[-10:]
+    avg_body = np.mean(np.abs(bodies.iloc[:-1])) + 0.00001
     current_body = abs(closes.iloc[-1] - opens.iloc[-1])
-
-    if avg_body == 0:
-        avg_body = 0.00001
-
     momentum_score = current_body / avg_body
 
     if momentum_score >= 1.8:
-        strength = "قوية"
-        trade_time = "1 دقيقة"
+        strength, trade_time = "قوية 💪", "1 min"
     elif momentum_score >= 1.2:
-        strength = "متوسطة"
-        trade_time = "3 دقائق"
+        strength, trade_time = "متوسطة ⚡", "3 min"
     else:
-        strength = "ضعيفة"
-        trade_time = "5 دقائق"
+        strength, trade_time = "ضعيفة ⚠️", "5 min"
 
     name = symbol.replace("/", "")
-
     if trend_up:
-        msg = f"""🟢 {name}
-📈 BUY
-💰 {current}
-💪 قوة الإشارة: {strength}
-⏱️ الوقت: {trade_time}"""
+        msg = f"🟢 {name}\n📈 BUY\n💰 Price: {current}\n💪 Signal: {strength}\n⏱️ Time: {trade_time}"
         return {"msg": msg, "score": momentum_score}
-
-    if trend_down:
-        msg = f"""🔴 {name}
-📉 SELL
-💰 {current}
-💪 قوة الإشارة: {strength}
-⏱️ الوقت: {trade_time}"""
+    elif trend_down:
+        msg = f"🔴 {name}\n📉 SELL\n💰 Price: {current}\n💪 Signal: {strength}\n⏱️ Time: {trade_time}"
         return {"msg": msg, "score": momentum_score}
-
     return None
 
 # ============================
-# تشغيل البوت
+# تشغيل أوامر التلجرام
 # ============================
 @bot.message_handler(commands=['signals', 'start'])
 def handle(message):
-    bot.send_message(message.chat.id, "جاري تحليل السوق…")
-
+    bot.send_message(message.chat.id, "🔍 جاري فحص السوق وتحليل أفضل الفرص...")
     results = []
-
     for s in SYMBOLS:
         res = get_signal(s)
-        print(s, "=>", "Signal" if res else "No signal")
-        if res:
-            results.append(res)
-        time.sleep(0.2)
+        if res: results.append(res)
+        time.sleep(0.1) # لتجنب ضغط الـ API
 
-    while len(results) < 3:
-        results.append({
-            "msg": "⚠️ لا توجد بيانات كافية لهذا الزوج",
-            "score": 0
-        })
+    if not results:
+        bot.send_message(message.chat.id, "السوق حالياً هادئ جداً، لا توجد إشارات قوية.")
+        return
 
     top3 = sorted(results, key=lambda x: x["score"], reverse=True)[:3]
-
-    blocks = []
-    for item in top3:
-        blocks.append(item["msg"])
-        blocks.append("-------------------")
-
-    final_text = "🎯 أفضل 3 إشارات حالياً:\n\n" + "\n".join(blocks[:-1])
+    final_text = "🎯 أفضل 3 إشارات حالياً:\n\n" + "\n\n---\n\n".join([item["msg"] for item in top3])
     bot.send_message(message.chat.id, final_text)
 
-print("✅ البوت يعمل الآن باستخدام TwelveData")
-
 def run_bot():
+    print("✅ البوت يعمل الآن ويراقب السوق...")
     bot.infinity_polling()
 
-threading.Thread(target=run_bot).start()
+if __name__ == "__main__":
+    # تشغيل البوت في الخيط الرئيسي
+    run_bot()
