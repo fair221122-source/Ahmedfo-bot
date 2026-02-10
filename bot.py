@@ -44,16 +44,30 @@ def get_candles(symbol):
     for interval in intervals:
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=10&apikey={API_KEY}"
 
+        print("Trying:", symbol, interval)
+
         try:
             r = requests.get(url, timeout=5).json()
         except Exception as e:
-            print(f"API Error for {symbol} ({interval}):", e)
+            print("Request error:", e)
             continue
 
+        # لو API رجع خطأ
+        if "status" in r and r["status"] == "error":
+            print("API Error:", r.get("message"))
+            continue
+
+        # لو ما فيه values
         if "values" not in r:
-            print(f"{symbol} ({interval}) => no values")
+            print("No values key for", symbol, interval)
             continue
 
+        # لو values فاضية
+        if not r["values"]:
+            print("Empty values for", symbol, interval)
+            continue
+
+        # تحويل البيانات
         df = pd.DataFrame(r["values"])
         df["open"] = df["open"].astype(float)
         df["close"] = df["close"].astype(float)
@@ -61,6 +75,12 @@ def get_candles(symbol):
         df["low"] = df["low"].astype(float)
 
         df = df.iloc[::-1]  # ترتيب الشموع
+
+        print("SUCCESS:", symbol, "using", interval)
+        return df
+
+    print("FAILED:", symbol)
+    return None
         print(f"{symbol} using interval {interval}")
         return df
 
