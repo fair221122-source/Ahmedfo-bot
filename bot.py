@@ -9,7 +9,8 @@ def home():
 
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
-    
+threading.Thread(target=run_flask).start()
+
 import requests
 import telebot
 import pandas as pd
