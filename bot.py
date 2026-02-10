@@ -1,20 +1,16 @@
 import os
-from flask import Flask
-import threading
 import yfinance as yf
 import telebot
 import pandas as pd
 import numpy as np
 import time
+from flask import Flask
+import threading
 
-# ============================
-# 1. إعداد السيرفر (Render Port Fix)
-# ============================
+# --- إعداد السيرفر لـ Render ---
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "Bot is running with Bulk Mode"
+def home(): return "Bot is Running"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -22,9 +18,7 @@ def run_flask():
 
 threading.Thread(target=run_flask, daemon=True).start()
 
-# ============================
-# 2. إعدادات التلجرام والعملات
-# ============================
+# --- إعدادات البوت ---
 TELEGRAM_TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -37,65 +31,55 @@ SYMBOLS = [
     'USDCHF=X', 'USDJPY=X'
 ]
 
-# ============================
-# 3. الدالة الجديدة (Bulk Download)
-# ============================
 @bot.message_handler(commands=['signals', 'start'])
 def handle(message):
-    bot.send_message(message.chat.id, "🔎 جاري فحص السوق ...")
-    
+    bot.send_message(message.chat.id, "🎯 جاري فحص السوق واستخراج أفضل الإشارات...")
     try:
-        # طلب بيانات جميع العملات بطلقة واحدة فقط (لتجنب الـ Rate Limit)
         data = yf.download(tickers=SYMBOLS, period='1d', interval='1m', group_by='ticker', progress=False)
-        
         results = []
+
         for s in SYMBOLS:
-            # استخراج بيانات كل عملة من الطلب الموحد
-            df = data[s] if len(SYMBOLS) > 1 else data
-            df = df.dropna() # تنظيف البيانات من القيم الفارغة
+            df = data[s].dropna()
+            if df.empty or len(df) < 15: continue
             
-            if df.empty or len(df) < 15:
-                continue
+            close, open_val = df['Close'].iloc[-1], df['Open'].iloc[-1]
+            avg_move = np.mean(np.abs(df['Close'] - df['Open']).iloc[-15:-1]) + 1e-9
+            score = abs(close - open_val) / avg_move
             
-            closes = df['Close'].astype(float)
-            opens = df['Open'].astype(float)
-            current = float(closes.iloc[-1])
-            
-            # حساب الزخم (Momentum)
-            body = abs(closes.iloc[-1] - opens.iloc[-1])
-            avg_body = np.mean(np.abs(closes - opens).iloc[-15:-1]) + 1e-9
-            score = body / avg_body
-            
-            # فلتر الإشارة (يمكنك تعديل 0.8 في الصباح إلى 1.2)
             if score > 0.8:
-                # تحديد الاتجاه بناءً على أخر 5 دقائق
-                trend_up = current > closes.iloc[-5:].mean()
-                direction = "🟢 شراء (BUY)" if trend_up else "🔴 بيع (SELL)"
-                
+                trend_up = close > df['Close'].iloc[-10:].mean()
                 results.append({
-                    "msg": f"{direction} | **{s.replace('=X','')}**\n💰 السعر: {current:.5f}\n💪 القوة: {score:.2f}",
-                    "score": score
+                    "pair": s.replace("=X", ""),
+                    "dir": "🟢 BUY" if trend_up else "🔴 SELL",
+                    "emoji": "📈" if trend_up else "📉",
+                    "price": f"{close:.5f}",
+                    "score_val": score
                 })
 
         if not results:
-            bot.send_message(message.chat.id, "⚠️ لا توجد فرص قوية حالياً. انتظر حركة السوق.")
-        else:
-            # ترتيب أفضل 3 إشارات
-            top = sorted(results, key=lambda x: x["score"], reverse=True)[:3]
-            final_msg = "🎯 **أفضل 3 فرص حالياً:**\n\n" + "\n\n---\n\n".join([i["msg"] for i in top])
-            bot.send_message(message.chat.id, final_msg, parse_mode="Markdown")
+            bot.send_message(message.chat.id, "⚠️ السوق هادئ حالياً، لا توجد إشارات قوية.")
+            return
+
+        top = sorted(results, key=lambda x: x["score_val"], reverse=True)[:3]
+        
+        response = "🎯 **أفضل الإشارات المتوفرة حالياً:**\n\n"
+        for item in top:
+            # تحديد قوة الإشارة بناءً على الرقم
+            if item['score_val'] > 2.0: strength, t = "قوية جداً 🔥", "1 دقيقة"
+            elif item['score_val'] > 1.2: strength, t = "قوية 💪", "3 دقائق"
+            else: strength, t = "متوسطة ⚡", "5 دقائق"
+
+            response += f"{item['dir']} **{item['pair']}**\n"
+            response += f"{item['emoji']} {item['dir'].split()[1]}\n"
+            response += f"💰 {item['price']}\n"
+            response += f"💪 قوة الإشارة: {strength}\n"
+            response += f"⏱️ الوقت: {t}\n"
+            response += "-------------------\n"
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
 
     except Exception as e:
-        print(f"Error: {e}")
-        bot.send_message(message.chat.id, "❌ خطأ في جلب البيانات من ياهو. يرجى المحاولة لاحقاً.")
+        bot.send_message(message.chat.id, "❌ حدث خطأ في جلب البيانات، يرجى المحاولة لاحقاً.")
 
-# ============================
-# 4. تشغيل البوت
-# ============================
-def run_bot():
-    print("✅ البوت يعمل بنظام الطلب الموحد...")
-    bot.remove_webhook()
-    bot.infinity_polling(timeout=20, long_polling_timeout=10)
-
-if __name__ == "__main__":
-    run_bot()
+bot.remove_webhook()
+bot.infinity_polling()
