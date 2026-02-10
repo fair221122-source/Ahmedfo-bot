@@ -27,12 +27,19 @@ API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
 
 SYMBOLS = [
     "AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD",
-    "CAD/CHF","CAD/JPY","CHF/JPY",
-    "EUR/CAD","EUR/CHF","EUR/GBP","EUR/JPY","EUR/USD",
-    "GBP/AUD","GBP/CAD","GBP/CHF","GBP/JPY","GBP/NZD","GBP/USD",
-    "NZD/CAD","NZD/CHF","NZD/JPY","NZD/USD",
-    "USD/CAD","USD/CHF","USD/JPY",
-    "XAU/USD"
+SYMBOLS = [
+    "EUR/USD",
+    "GBP/USD",
+    "USD/JPY",
+    "USD/CHF",
+    "USD/CAD",
+    "AUD/USD",
+    "NZD/USD",
+    "EUR/JPY",
+    "GBP/JPY",
+    "EUR/GBP",
+    "XAU/USD",
+    "AUD/JPY"
 ]
 
 # ============================
