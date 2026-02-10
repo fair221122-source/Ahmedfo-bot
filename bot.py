@@ -9,6 +9,7 @@ def home():
 
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
+
 threading.Thread(target=run_flask).start()
 
 import requests
@@ -18,15 +19,12 @@ import numpy as np
 import time
 
 # ============================
-# ضع التوكن هنا
 TELEGRAM_TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# مفتاح TwelveData
 API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
 # ============================
 
-# جميع الأزواج الأصلية بصيغة TwelveData
 SYMBOLS = [
     "AUD/CAD","AUD/CHF","AUD/JPY","AUD/NZD","AUD/USD",
     "CAD/CHF","CAD/JPY","CHF/JPY",
@@ -37,28 +35,62 @@ SYMBOLS = [
     "XAU/USD"
 ]
 
-# جلب الشموع من TwelveData
+# ============================
+# دالة الشموع بعد المحاكاة
+# ============================
 def get_candles(symbol):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&outputsize=40&apikey={API_KEY}"
-    r = requests.get(url).json()
+    intervals = ["1min", "3min", "5min"]
 
-    if "values" not in r:
-        return None
+    for interval in intervals:
+        print("Trying:", symbol, interval)
 
-    df = pd.DataFrame(r["values"])
-    df["open"] = df["open"].astype(float)
-    df["close"] = df["close"].astype(float)
-    df["high"] = df["high"].astype(float)
-    df["low"] = df["low"].astype(float)
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=10&apikey={API_KEY}"
 
-    df = df.iloc[::-1]  # ترتيب الشموع من الأقدم للأحدث
-    return df
+        try:
+            r = requests.get(url, timeout=5).json()
+        except Exception as e:
+            print("Request error:", e)
+            continue
 
+        # حالة خطأ من API
+        if "status" in r and r["status"] == "error":
+            print("API Error:", r.get("message"))
+            continue
+
+        # لا يوجد values
+        if "values" not in r:
+            print("No values key for", symbol, interval)
+            continue
+
+        # values فارغة
+        if not r["values"]:
+            print("Empty values for", symbol, interval)
+            continue
+
+        # تحويل البيانات
+        df = pd.DataFrame(r["values"])
+        df["open"] = df["open"].astype(float)
+        df["close"] = df["close"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+
+        df = df.iloc[::-1]
+
+        print("SUCCESS:", symbol, "using", interval)
+        return df
+
+    print("FAILED:", symbol)
+    return None
+
+# ============================
 # EMA20
+# ============================
 def ema20(series):
     return series.ewm(span=20, adjust=False).mean().iloc[-1]
 
+# ============================
 # تحليل الإشارة
+# ============================
 def get_signal(symbol):
     df = get_candles(symbol)
     if df is None or len(df) < 20:
@@ -73,7 +105,6 @@ def get_signal(symbol):
     trend_up = current > ema
     trend_down = current < ema
 
-    # حساب الزخم
     bodies = (closes - opens).iloc[-15:]
     avg_body = np.mean(np.abs(bodies.iloc[:-1]))
     current_body = abs(closes.iloc[-1] - opens.iloc[-1])
@@ -83,7 +114,6 @@ def get_signal(symbol):
 
     momentum_score = current_body / avg_body
 
-    # قوة الإشارة
     if momentum_score >= 1.8:
         strength = "قوية"
         trade_time = "1 دقيقة"
@@ -130,14 +160,12 @@ def handle(message):
             results.append(res)
         time.sleep(0.2)
 
-    # ضمان 3 إشارات
     while len(results) < 3:
         results.append({
             "msg": "⚠️ لا توجد بيانات كافية لهذا الزوج",
             "score": 0
         })
 
-    # أفضل 3 إشارات
     top3 = sorted(results, key=lambda x: x["score"], reverse=True)[:3]
 
     blocks = []
@@ -148,13 +176,9 @@ def handle(message):
     final_text = "🎯 أفضل 3 إشارات حالياً:\n\n" + "\n".join(blocks[:-1])
     bot.send_message(message.chat.id, final_text)
 
-print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
-
-import threading
+print("✅ البوت يعمل الآن باستخدام TwelveData")
 
 def run_bot():
     bot.infinity_polling()
 
-bot_thread = threading.Thread(target=run_bot)
-bot_thread.start()
-app.run(host="0.0.0.0", port=10000)
+threading.Thread(target=run_bot).start()
