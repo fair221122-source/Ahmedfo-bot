@@ -149,7 +149,7 @@ def handle(message):
     bot.send_message(message.chat.id, final_text)
 
 print("✅ البوت يعمل الآن باستخدام TwelveData + جميع الأزواج")
-bot.infinity_polling(skip_pending=True)
+
 import threading
 
 def run_bot():
@@ -157,3 +157,4 @@ def run_bot():
 
 bot_thread = threading.Thread(target=run_bot)
 bot_thread.start()
+app.run(host="0.0.0.0", port=10000)
