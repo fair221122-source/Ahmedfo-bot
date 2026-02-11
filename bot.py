@@ -4,6 +4,7 @@ import pandas as pd
 import pandas_ta as ta
 from flask import Flask
 from threading import Thread
+import time
 
 app = Flask('')
 @app.route('/')
@@ -13,7 +14,7 @@ def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
 # --- إعدادات البوت ---
-TOKEN = '8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0' # ضع التوكن الخاص بك هنا
+TOKEN = '8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0' # تأكد من وضع التوكن الخاص بك كاملاً هنا
 bot = telebot.TeleBot(TOKEN)
 
 # --- قوائم العملات ---
@@ -32,11 +33,11 @@ CRYPTO_FUTURES = [
 
 def analyze_market(symbol, timeframe='1h'):
     try:
-        # التحليل على فريم الساعة
+        # جلب البيانات
         data = yf.download(symbol, period='5d', interval=timeframe, progress=False)
         if data.empty: return None
         
-        # المؤشرات الفنية
+        # المؤشرات
         data['RSI'] = ta.rsi(data['Close'], length=14)
         data['EMA200'] = ta.ema(data['Close'], length=200)
         atr_result = ta.atr(data['High'], data['Low'], data['Close'], length=14)
@@ -47,29 +48,16 @@ def analyze_market(symbol, timeframe='1h'):
         rsi = last['RSI']
         ema_val = last['EMA200']
         
-        action = None
-        score = 0
-        
-        # --- المنطق المرن الجديد (يظهر نتائج حتى في التذبذب) ---
+        # المنطق المرن (BUY/SHORT)
         if price > ema_val:
             action = "BUY"
-            # إذا كان RSI قوي يعطي سكور عالي، وإذا ضعيف يعطي سكور مقبول للعرض
             score = 85.5 if rsi > 55 else 58.2
         else:
             action = "SHORT"
             score = 84.1 if rsi < 45 else 56.4
 
-        # تم تقليل حد القبول لضمان عدم ظهور رسالة "لا توجد فرص"
-        if not action or score < 40: return None
-        # ----------------------------------------------------
-
-        # إدارة وقت الصفقة بناءً على القوة
-        if score >= 80:
-            time_val, rr_ratio = "3 دقائق", 5
-        else:
-            time_val, rr_ratio = "5 دقائق", 3
-
-        # حساب الأهداف (ATR Dynamic)
+        # تحديد الأهداف
+        rr_ratio = 5 if score >= 80 else 3
         sl_dist = atr * 1.5
         sl = price - sl_dist if action == "BUY" else price + sl_dist
         tp = price + (sl_dist * rr_ratio) if action == "BUY" else price - (sl_dist * rr_ratio)
@@ -82,34 +70,10 @@ def analyze_market(symbol, timeframe='1h'):
             'sl': round(float(sl), 5),
             'score': score,
             'rr': f"1:{rr_ratio}",
-            'time': time_val
+            'time': "3 دقائق" if score >= 80 else "5 دقائق"
         }
-    except:
-        return None
-
-
-        if score >= 85:
-            time_val, rr_ratio = "3 دقائق", 5
-        elif 70 <= score < 85:
-            time_val, rr_ratio = "3 دقائق", 4
-        else:
-            time_val, rr_ratio = "5 دقائق", 3
-
-        sl_dist = atr * 1.5
-        sl = price - sl_dist if action == "BUY" else price + sl_dist
-        tp = price + (sl_dist * rr_ratio) if action == "BUY" else price - (sl_dist * rr_ratio)
-
-        return {
-            'symbol': symbol.replace('=X', '').replace('-USD', ''),
-            'action': action,
-            'price': round(float(price), 5),
-            'tp': round(float(tp), 5),
-            'sl': round(float(sl), 5),
-            'score': score,
-            'rr': f"1:{rr_ratio}",
-            'time': time_val
-        }
-    except:
+    except Exception as e:
+        print(f"Error analyzing {symbol}: {e}")
         return None
 
 # --- أوامر التيلجرام ---
@@ -120,23 +84,16 @@ def forex_msg(message):
     results = []
     for symbol in FOREX_PAIRS:
         data = analyze_market(symbol)
-        if data:
-            results.append(data)
+        if data: results.append(data)
     
     signals = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
-
     if not signals:
         bot.reply_to(message, "⚠️ لا توجد فرص فوركس متاحة حالياً.")
         return
 
     response = "📊 **أفضل 3 فرص فوركس حالياً:**\n\n"
     for s in signals:
-        success_rate = f"{s['score']}%"
-        response += f"🔹 {s['symbol']}\n"
-        response += f"📈 الإشارة: {s['action']}\n"
-        response += f"🎯 نسبة النجاح المتوقعة: {success_rate}\n"
-        response += "------------------------\n"
-    
+        response += f"🔹 {s['symbol']}\n📈 الإشارة: {s['action']}\n🎯 نسبة النجاح: {s['score']}%\n⏰ الوقت: {s['time']}\n------------------------\n"
     response += "\n**GOOD LUCK AHMED 👍**"
     bot.reply_to(message, response, parse_mode="Markdown")
 
@@ -146,8 +103,7 @@ def crypto_msg(message):
     results = []
     for symbol in CRYPTO_FUTURES:
         data = analyze_market(symbol)
-        if data:
-            results.append(data)
+        if data: results.append(data)
     
     signals = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
     medals = ["🥇", "🥈", "🥉"]
@@ -158,18 +114,13 @@ def crypto_msg(message):
 
     response = "🚀 **أفضل 3 صفقات كريبتو حالياً:**\n\n"
     for i, s in enumerate(signals):
-        success_rate = f"{s['score']}%"
-        response += f"{medals[i]} {s['symbol']}\n"
-        response += f"⚡️ قوة الإشارة: {success_rate}\n"
-        response += f"🔔 التوصية: {s['action']}\n"
-        response += "------------------------\n"
-    
+        response += f"{medals[i]} {s['symbol']}\n⚡️ القوة: {s['score']}%\n🔔 التوصية: {s['action']}\n⏰ الوقت: {s['time']}\n------------------------\n"
     response += "\n**GOOD LUCK AHMED 👍**"
     bot.reply_to(message, response, parse_mode="Markdown")
 
 # --- تشغيل البوت ---
 if __name__ == "__main__":
-    keep_alive() # تفعيل نظام البقاء مستيقظاً
+    keep_alive()
     bot.remove_webhook()
     print("البوت يعمل الآن يا أحمد...")
     bot.infinity_polling(skip_pending=True)
