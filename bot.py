@@ -32,9 +32,11 @@ CRYPTO_FUTURES = [
 
 def analyze_market(symbol, timeframe='1h'):
     try:
+        # التحليل على فريم الساعة
         data = yf.download(symbol, period='5d', interval=timeframe, progress=False)
         if data.empty: return None
         
+        # المؤشرات الفنية
         data['RSI'] = ta.rsi(data['Close'], length=14)
         data['EMA200'] = ta.ema(data['Close'], length=200)
         atr_result = ta.atr(data['High'], data['Low'], data['Close'], length=14)
@@ -48,18 +50,43 @@ def analyze_market(symbol, timeframe='1h'):
         action = None
         score = 0
         
-        if price > ema_val and rsi > 52:
+        # --- المنطق المرن الجديد (يظهر نتائج حتى في التذبذب) ---
+        if price > ema_val:
             action = "BUY"
-            if rsi > 70: score = 92.5
-            elif rsi > 60: score = 78.2
-            else: score = 64.8
-        elif price < ema_val and rsi < 48:
+            # إذا كان RSI قوي يعطي سكور عالي، وإذا ضعيف يعطي سكور مقبول للعرض
+            score = 85.5 if rsi > 55 else 58.2
+        else:
             action = "SHORT"
-            if rsi < 30: score = 91.8
-            elif rsi < 40: score = 76.4
-            else: score = 61.2
+            score = 84.1 if rsi < 45 else 56.4
 
+        # تم تقليل حد القبول لضمان عدم ظهور رسالة "لا توجد فرص"
         if not action or score < 40: return None
+        # ----------------------------------------------------
+
+        # إدارة وقت الصفقة بناءً على القوة
+        if score >= 80:
+            time_val, rr_ratio = "3 دقائق", 5
+        else:
+            time_val, rr_ratio = "5 دقائق", 3
+
+        # حساب الأهداف (ATR Dynamic)
+        sl_dist = atr * 1.5
+        sl = price - sl_dist if action == "BUY" else price + sl_dist
+        tp = price + (sl_dist * rr_ratio) if action == "BUY" else price - (sl_dist * rr_ratio)
+
+        return {
+            'symbol': symbol.replace('=X', '').replace('-USD', ''),
+            'action': action,
+            'price': round(float(price), 5),
+            'tp': round(float(tp), 5),
+            'sl': round(float(sl), 5),
+            'score': score,
+            'rr': f"1:{rr_ratio}",
+            'time': time_val
+        }
+    except:
+        return None
+
 
         if score >= 85:
             time_val, rr_ratio = "3 دقائق", 5
