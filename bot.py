@@ -92,51 +92,54 @@ def analyze_market(symbol, timeframe='1h'):
 
 # --- أوامر التيلجرام ---
 
-@bot.message_handler(commands=['crypto'])
-def crypto_msg(message):
-    bot.send_chat_action(message.chat.id, 'typing')
-    results = [analyze_market(s) for s in CRYPTO_FUTURES]
-    signals = sorted([s for s in results if s], key=lambda x: x['score'], reverse=True)[:3]
-    
-    if not signals:
-        bot.reply_to(message, "⚠️ السوق متذبذب حالياً، لا توجد صفقات كريبتو مستقرة.")
-        return
-
-    icons = ["🥇 TOP PICK", "🥈 SECOND BEST", "🥉 THIRD PICK"]
-    response = "📊 **الكربتو**\n\n"
-    for i, s in enumerate(signals):
-        response += (f"{icons[i]}: {s['symbol']}/USDT\n"
-                     f"🎯 Success: {s['score']} %\n"
-                     f"⚡ Type: {s['action']} {'🟢' if s['action']=='BUY' else '🔴'}\n"
-                     f"Entry: {s['price']}\n"
-                     f"S.L: {s['sl']}\n"
-                     f"T.P: {s['tp']}\n"
-                     f"R:R: {s['rr']}\n\n")
-    response += "----------------------\n**GOOD LUCK AHMED 👍**"
-    bot.send_message(message.chat.id, response, parse_mode="Markdown")
-
+# --- دالة تحليل الفوركس المحدثة ---
 @bot.message_handler(commands=['forex'])
 def forex_msg(message):
-    bot.send_chat_action(message.chat.id, 'typing')
-    results = [analyze_market(s) for s in FOREX_PAIRS]
-    signals = sorted([s for s in results if s], key=lambda x: x['score'], reverse=True)[:3]
+    results = []
+    # سنقوم بتحليل أزواج العملات
+    for symbol in FOREX_PAIRS:
+        data = analyze_market(symbol)
+        if data:
+            results.append(data)
     
-    if not signals:
-        bot.reply_to(message, "⚠️ لا توجد فرص قوية في الفوركس حالياً.")
-        return
+    # ترتيب حسب القوة واختيار أفضل 3 فقط (حتى لو القوة قليلة)
+    signals = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
 
-    response = "📊 **الفوركس :**\n🎯 أفضل 3 إشارات حالياً:\n\n"
+    response = "📊 **أفضل 3 فرص فوركس حالياً:**\n\n"
     for s in signals:
-        quality = "قوية" if s['score'] >= 85 else ("متوسطة" if s['score'] >= 70 else "ضعيفة")
-        icon = "🟢" if s['action'] == "BUY" else "🔴"
-        response += (f"{icon} {s['symbol']}\n"
-                     f"{'📈 BUY' if s['action'] == 'BUY' else '📉 SHORT'}\n"
-                     f"💰 {s['price']}\n"
-                     f"💪 قوة الإشارة: {quality} {round(s['score'], 1)}%\n"
-                     f"⏱️ الوقت: {s['time']}\n"
-                     f"-------------------\n")
-    response += "**GOOD LUCK AHMED 👍**"
-    bot.send_message(message.chat.id, response, parse_mode="Markdown")
+        # تحويل السكور لنسبة مئوية (مثلاً 80 يصبح 80%)
+        success_rate = f"{s['score']}%"
+        response += f"🔹 {s['pair']}\n"
+        response += f"📈 الإشارة: {s['signal']}\n"
+        response += f"🎯 نسبة النجاح المتوقعة: {success_rate}\n"
+        response += "------------------------\n"
+    
+    response += "\n**GOOD LUCK AHMED 👍**"
+    bot.reply_to(message, response, parse_mode="Markdown")
+
+# --- دالة تحليل الكريبتو المحدثة ---
+@bot.message_handler(commands=['crypto'])
+def crypto_msg(message):
+    results = []
+    for symbol in CRYPTO_PAIRS:
+        data = analyze_market(symbol)
+        if data:
+            results.append(data)
+    
+    # ترتيب حسب القوة واختيار أفضل 3 مع الميداليات
+    signals = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
+    medals = ["🥇", "🥈", "🥉"]
+
+    response = "🚀 **أفضل 3 صفقات كريبتو حالياً:**\n\n"
+    for i, s in enumerate(signals):
+        success_rate = f"{s['score']}%"
+        response += f"{medals[i]} {s['pair']}\n"
+        response += f"⚡️ قوة الإشارة: {success_rate}\n"
+        response += f"🔔 التوصية: {s['signal']}\n"
+        response += "------------------------\n"
+    
+    response += "\n**GOOD LUCK AHMED 👍**"
+    bot.reply_to(message, response, parse_mode="Markdown")
 
 # --- تشغيل البوت ---
 if __name__ == "__main__":
