@@ -1,81 +1,85 @@
-import telebot
+import os
 import yfinance as yf
-import pandas_ta as ta
-from flask import Flask
-from threading import Thread
+import telebot
+import pandas as pd
+import numpy as np
 import time
+from flask import Flask
+import threading
 
-app = Flask('')
+# --- إعداد السيرفر لـ Render ---
+app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot is Online!"
+def home(): return "Bot is Running"
 
-def run(): app.run(host='0.0.0.0', port=8080)
-def keep_alive(): Thread(target=run).start()
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
 
 # --- إعدادات البوت ---
-TOKEN = '8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0' # التوكن الخاص بك
-bot = telebot.TeleBot(TOKEN)
+TELEGRAM_TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# قوائم العملات الأصلية كاملة (دون تقليص)
-FOREX_PAIRS = ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X', 'USDCHF=X']
-CRYPTO_FUTURES = ['SOL-USD', 'AVAX-USD', 'BTC-USD', 'ETH-USD', 'XRP-USD', 'BNB-USD', 'ADA-USD']
+SYMBOLS = [
+    'AUDCAD=X', 'AUDCHF=X', 'AUDJPY=X', 'AUDNZD=X', 'AUDUSD=X',
+    'CADCHF=X', 'CADJPY=X', 'CHFJPY=X', 'EURAUD=X', 'EURCAD=X',
+    'EURCHF=X', 'EURGBP=X', 'EURJPY=X', 'EURNZD=X', 'EURUSD=X',
+    'GBPAUD=X', 'GBPCAD=X', 'GBPCHF=X', 'GBPJPY=X', 'GBPNZD=X', 
+    'GBPUSD=X', 'NZDCHF=X', 'NZDJPY=X', 'NZDUSD=X', 'USDCAD=X', 
+    'USDCHF=X', 'USDJPY=X'
+]
 
-def analyze_market(symbol):
+@bot.message_handler(commands=['signals', 'start'])
+def handle(message):
+    bot.send_message(message.chat.id, "🎯 جاري فحص السوق واستخراج أفضل الإشارات...")
     try:
-        # جلب البيانات (period='1d' لتجنب الأخطاء، interval='15m' للدقة)
-        data = yf.download(symbol, period='1d', interval='15m', progress=False)
-        if data.empty or len(data) < 10: return None
+        data = yf.download(tickers=SYMBOLS, period='1d', interval='1m', group_by='ticker', progress=False)
+        results = []
+
+        for s in SYMBOLS:
+            df = data[s].dropna()
+            if df.empty or len(df) < 15: continue
+            
+            close, open_val = df['Close'].iloc[-1], df['Open'].iloc[-1]
+            avg_move = np.mean(np.abs(df['Close'] - df['Open']).iloc[-15:-1]) + 1e-9
+            score = abs(close - open_val) / avg_move
+            
+            if score > 0.8:
+                trend_up = close > df['Close'].iloc[-10:].mean()
+                results.append({
+                    "pair": s.replace("=X", ""),
+                    "dir": "🟢 BUY" if trend_up else "🔴 SELL",
+                    "emoji": "📈" if trend_up else "📉",
+                    "price": f"{close:.5f}",
+                    "score_val": score
+                })
+
+        if not results:
+            bot.send_message(message.chat.id, "⚠️ السوق هادئ حالياً، لا توجد إشارات قوية.")
+            return
+
+        top = sorted(results, key=lambda x: x["score_val"], reverse=True)[:3]
         
-        price = float(data['Close'].iloc[-1])
-        # تحليل يعتمد على حركة السعر فقط (بدون RSI خانق)
-        # إذا كان السعر الحالي أعلى من سعر 5 شموع سابقة (صعود)
-        action = "BUY 🟢" if price > data['Close'].iloc[-5] else "SHORT 🔴"
-        score = 92.0 if "BUY" in action else 78.5
+        response = " **أفضل الإشارات المتوفرة حالياً:**\n\n"
+        for item in top:
+            # تحديد قوة الإشارة بناءً على الرقم
+            if item['score_val'] > 2.0: strength, t = "قوية جداً 🔥", "1 دقيقة"
+            elif item['score_val'] > 1.2: strength, t = "قوية 💪", "3 دقائق"
+            else: strength, t = "متوسطة ⚡", "5 دقائق"
+
+            response += f"{item['dir']} **{item['pair']}**\n"
+            response += f"{item['emoji']} {item['dir'].split()[1]}\n"
+            response += f"💰 {item['price']}\n"
+            response += f"💪 قوة الإشارة: {strength}\n"
+            response += f"⏱️ الوقت: {t}\n"
+            response += "-------------------\n"
         
-        # حساب أهداف تلقائية بناءً على السعر
-        diff = price * 0.005
-        sl = round(price - diff if "BUY" in action else price + diff, 4)
-        tp = round(price + (diff * 3) if "BUY" in action else price - (diff * 3), 4)
+        bot.send_message(message.chat.id, response, parse_mode="Markdown")
 
-        return {
-            'symbol': symbol.replace('=X', '').replace('-USD', ''),
-            'action': action, 'price': round(price, 5),
-            'tp': tp, 'sl': sl, 'rr': "1:3", 'score': score, 'time': "4 ساعات"
-        }
-    except: return None
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ حدث خطأ في جلب البيانات، يرجى المحاولة لاحقاً.")
 
-@bot.message_handler(commands=['forex'])
-def forex_msg(message):
-    results = [analyze_market(s) for s in FOREX_PAIRS]
-    signals = [r for r in results if r][:3] # عرض أفضل 3
-    if not signals:
-        bot.reply_to(message, "⚠️ فشل مؤقت في جلب البيانات، حاول مجدداً.")
-        return
-    response = "🎯 أفضل 3 إشارات حالياً:\n"
-    for s in signals:
-        emoji = "🟢" if "BUY" in s['action'] else "🔴"
-        strength = "قوية" if s['score'] >= 90 else "متوسطة"
-        response += f"\n{emoji} {s['symbol']}\n📈 {s['action'].split()[0]}\n💰 {s['price']}\n💪 قوة الإشارة: {strength} {s['score']}%\n⏱️ الوقت: {s['time']}\n"
-    response += "\nGOOD LUCK AHMED 👍"
-    bot.reply_to(message, response)
-
-@bot.message_handler(commands=['crypto'])
-def crypto_msg(message):
-    results = [analyze_market(s) for s in CRYPTO_FUTURES]
-    signals = [r for r in results if r][:3] # عرض أفضل 3
-    if not signals:
-        bot.reply_to(message, "⚠️ لا توجد بيانات حالياً.")
-        return
-    medals = ["🥇 TOP PICK:", "🥈 SECOND BEST:", "🥉 THIRD PICK:"]
-    response = ""
-    for i, s in enumerate(signals):
-        response += f"\n{medals[i]} {s['symbol']}/USDT\n🎯 Success: {s['score']} %\n⚡ Type: {s['action']}\nEntry: {s['price']}\nS.L: {s['sl']}\nT.P: {s['tp']}\nR:R: {s['rr']}\n⏱️ الوقت: {s['time']}\n"
-    response += "\nGOOD LUCK AHMED 👍"
-    bot.reply_to(message, response)
-
-if __name__ == "__main__":
-    keep_alive()
-    bot.remove_webhook() # تنظيف التعارض القديم
-    time.sleep(1)
-    print("البوت انطلق يا أحمد.. جرب الآن!")
-    bot.infinity_polling(skip_pending=True)
+bot.remove_webhook()
+bot.infinity_polling()
