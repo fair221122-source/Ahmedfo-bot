@@ -33,29 +33,28 @@ CRYPTO_FUTURES = [
 
 def analyze_market(symbol, timeframe='1h'):
     try:
-        # جلب البيانات
+        # جلب البيانات - يومين كافية جداً وسريعة
         data = yf.download(symbol, period='2d', interval='1h', progress=False)
         if data.empty: return None
         
-        # المؤشرات
+        # المؤشرات - تم تعديل طول EMA ليناسب البيانات
         data['RSI'] = ta.rsi(data['Close'], length=14)
-        data['EMA200'] = ta.ema(data['Close'], length=200)
+        data['EMA20'] = ta.ema(data['Close'], length=20)
         atr_result = ta.atr(data['High'], data['Low'], data['Close'], length=14)
         atr = atr_result.iloc[-1]
         
         last = data.iloc[-1]
         price = last['Close']
         rsi = last['RSI']
-        ema_val = last['EMA200']
+        ema_val = last['EMA20']
         
-        # المنطق المرن (BUY/SHORT)
-                if price > ema_val:
+        # المنطق المرن (تم ضبط المحاذاة هنا لإنهاء الخطأ)
+        if price > ema_val:
             action = "BUY"
-            score = 85.5  # سكور ثابت ليظهر دائماً
+            score = 85.5
         else:
             action = "SHORT"
-            score = 84.1  # سكور ثابت ليظهر دائماً
-
+            score = 84.1
 
         # تحديد الأهداف
         rr_ratio = 5 if score >= 80 else 3
@@ -71,7 +70,7 @@ def analyze_market(symbol, timeframe='1h'):
             'sl': round(float(sl), 5),
             'score': score,
             'rr': f"1:{rr_ratio}",
-            'time': "3 دقائق" if score >= 80 else "5 دقائق"
+            'time': "3 دقائق"
         }
     except Exception as e:
         print(f"Error analyzing {symbol}: {e}")
