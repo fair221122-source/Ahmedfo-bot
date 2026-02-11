@@ -1,3 +1,4 @@
+import os
 import telebot
 import yfinance as yf
 import pandas as pd
@@ -9,7 +10,10 @@ app = Flask('')
 @app.route('/')
 def home(): return "Forex Momentum Bot is Online!"
 
-def run(): app.run(host='0.0.0.0', port=8080)
+def run():
+    # هذا السطر هو المفتاح لفتح المنفذ (Port Binding)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 def keep_alive(): Thread(target=run).start()
 
 # --- إعدادات البوت ---
