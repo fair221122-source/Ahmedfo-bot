@@ -62,7 +62,7 @@ def handle(message):
 
         top = sorted(results, key=lambda x: x["score_val"], reverse=True)[:3]
         
-        response = "🎯 **أفضل الإشارات المتوفرة حالياً:**\n\n"
+        response = " **أفضل الإشارات المتوفرة حالياً:**\n\n"
         for item in top:
             # تحديد قوة الإشارة بناءً على الرقم
             if item['score_val'] > 2.0: strength, t = "قوية جداً 🔥", "1 دقيقة"
