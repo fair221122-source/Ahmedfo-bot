@@ -10,7 +10,7 @@ import time
 # --- إعداد السيرفر ---
 app = Flask('')
 @app.route('/')
-def home(): return "Forex Bot is Online!"
+def home(): return "Bot is Online!"
 
 def run():
     port = int(os.environ.get("PORT", 10000))
@@ -30,53 +30,47 @@ FOREX_PAIRS = [
     'GBPNZD=X', 'AUDCAD=X', 'AUDCHF=X', 'AUDNZD=X', 'CADCHF=X', 'NZDCHF=X'
 ]
 
-def get_signal_details(score):
-    if score >= 80: return "ممتااازة", "3 دقائق"
-    elif score >= 60: return "جيدة جداً", "3 دقائق"
-    elif score >= 40: return "جيدة", "5 دقائق"
-    else: return "مقبولة", "10 دقائق"
-
 def analyze_momentum(symbol):
     try:
-        # فحص آخر 5 شموع
+        # فك الخناق: جلب آخر شمعتين فقط
         data = yf.download(symbol, period='1d', interval='5m', progress=False)
         if data.empty or len(data) < 2: return None
         
         last_candle = data.iloc[-1]
-        prev_candle = data.iloc[-2]
         
-        # تبسيط: إذا كانت آخر شمعة بنفس اتجاه التي قبلها
-        bullish = last_candle['Close'] > last_candle['Open'] and prev_candle['Close'] > prev_candle['Open']
-        bearish = last_candle['Close'] < last_candle['Open'] and prev_candle['Close'] < prev_candle['Open']
+        # شرط بسيط جداً: إذا كانت الشمعة الحالية صاعدة أو هابطة بوضوح
+        bullish = last_candle['Close'] > last_candle['Open']
+        bearish = last_candle['Close'] < last_candle['Open']
         
-        if not (bullish or bearish): return None
-        
-        # حساب الجسد مقابل الذيل بمرونة عالية جداً (50%)
+        # حساب قوة الشمعة (الجسم مقابل الذيول)
         body = abs(last_candle['Close'] - last_candle['Open'])
         total_range = last_candle['High'] - last_candle['Low']
-        ratio = body / total_range if total_range != 0 else 0
+        score = int((body / total_range) * 100) if total_range != 0 else 0
         
-        score = int(ratio * 100)
+        # تصنيف القوة
+        if score >= 70: label, t = "ممتازة", "3 دقائق"
+        elif score >= 50: label, t = "جيدة جداً", "3 دقائق"
+        else: label, t = "جيدة", "5 دقائق"
+        
         action = "BUY 🟢" if bullish else "SELL 🔴"
-        label, signal_time = get_signal_details(score)
         
         return {
             'symbol': symbol.replace('=X', ''),
             'action': action, 'price': round(last_candle['Close'], 5),
-            'label': label, 'score': score, 'time': signal_time
+            'label': label, 'score': score, 'time': t
         }
     except: return None
 
 @bot.message_handler(commands=['start', 'signals'])
 def send_signals(message):
     wait_msg = bot.reply_to(message, "جارِ تحليل السوق، إنتظر ثواني ...⏳")
-    
     results = []
+    
     for s in FOREX_PAIRS:
         res = analyze_momentum(s)
         if res: results.append(res)
+        time.sleep(0.5) # سرعة أكبر مع حماية من الحظر
     
-    # اختيار أفضل 3 حتى لو كانت النتيجة قليلة
     signals = sorted(results, key=lambda x: x['score'], reverse=True)[:3]
     
     if not signals:
@@ -95,5 +89,4 @@ def send_signals(message):
 if __name__ == "__main__":
     keep_alive()
     bot.remove_webhook()
-    time.sleep(1)
     bot.infinity_polling(skip_pending=True)
