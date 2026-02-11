@@ -106,4 +106,5 @@ def do_crypto(message):
         bot.edit_message_text("لا توجد مناطق دول آمنة حاليا ...❗", message.chat.id, m.message_id)
 
 bot.remove_webhook()
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
+
