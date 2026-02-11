@@ -99,7 +99,7 @@ def crypto_msg(message):
     signals = sorted([s for s in results if s], key=lambda x: x['score'], reverse=True)[:3]
     
     if not signals:
-        bot.reply_to(message, "⚠️ السوق متذبذب حالياً، لا توجد إشارات كريبتو مستقرة.")
+        bot.reply_to(message, "⚠️ السوق متذبذب حالياً، لا توجد صفقات كريبتو مستقرة.")
         return
 
     icons = ["🥇 TOP PICK", "🥈 SECOND BEST", "🥉 THIRD PICK"]
