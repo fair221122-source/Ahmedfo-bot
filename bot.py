@@ -59,7 +59,7 @@ def analyze_market(symbol, timeframe='1h'):
             elif rsi < 40: score = 76.4
             else: score = 61.2
 
-        if not action or score < 55: return None
+        if not action or score < 40: return None
 
         if score >= 85:
             time_val, rr_ratio = "3 دقائق", 5
