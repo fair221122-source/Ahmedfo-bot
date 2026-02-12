@@ -1,4 +1,4 @@
-python-telegram-bot
-yfinance
 pandas
+twelvedata
+python-telegram-bot
 nest_asyncio
