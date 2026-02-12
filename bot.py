@@ -4,11 +4,9 @@ import asyncio
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import nest_asyncio
-import os
 
 # 1. إعدادات البوت
-TOKEN = os.environ.get("8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0")  # مهم جداً: خليه من Environment Variables
+TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0" # ضع التوكن بالكامل هنا
 
 FOREX_PAIRS = [
     'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'GBPJPY=X', 'EURJPY=X', 
@@ -45,7 +43,6 @@ def analyze_strategy(pair):
         body_eff = (abs(target_candles['Close'] - target_candles['Open']) / (target_candles['High'] - target_candles['Low'])).mean() * 100
         
         score = int((dom_ratio * 50) + (body_eff * 0.5))
-
         label, expiry, final_score = get_signal_details(score)
         
         current_price = float(data['Close'].iloc[-1])
@@ -96,13 +93,9 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response)
 
 if __name__ == '__main__':
-    nest_asyncio.apply()
+    # التشغيل بنظام polling المباشر لبيئة Render المستقرة
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler('start', start_analysis))
     application.add_handler(CommandHandler('signals', start_analysis))
-
-    print("🚀 البوت يعمل الآن على Render")
-
-    # أهم سطر لتشغيله على Render
-    port = int(os.environ.get("PORT", 10000))
+    print("✅ البوت يعمل الآن بنظام الترند وتوقيت الرياض على Render.")
     application.run_polling()
