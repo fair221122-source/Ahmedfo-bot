@@ -85,9 +85,20 @@ async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response)
 
 if __name__ == '__main__':
+    # تشغيل سيرفر الـ Health Check
     threading.Thread(target=run_health_server, daemon=True).start()
+    
+    # تهيئة بيئة العمل
     nest_asyncio.apply()
+    
+    # بناء التطبيق
     application = ApplicationBuilder().token(TOKEN).build()
+    
+    # إضافة الأوامر
     application.add_handler(CommandHandler('start', start_analysis))
     application.add_handler(CommandHandler('signals', start_analysis))
-    application.run_polling()
+    
+    print("🚀 البوت ينطلق الآن على نسخة مستقرة...")
+    
+    # تشغيل البوت مع إعدادات حماية من أخطاء الاتصال
+    application.run_polling(drop_pending_updates=True, stop_signals=None)
