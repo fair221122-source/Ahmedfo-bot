@@ -28,8 +28,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is Running Successfully")
 
 def run_health_server():
-    server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+    # Render يرسل رقم البورت في متغير بيئة يسمى PORT
+    # إذا لم يجده، سيستخدم 10000 كخيار احتياطي
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    print(f"📡 السيرفر الوهمي يعمل الآن على البورت: {port}")
     server.serve_forever()
+
 
 # --- منطق التحليل المعدل ---
 def analyze_strategy(pair):
