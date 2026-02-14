@@ -1,4 +1,5 @@
 import os
+import re
 import telebot
 from twelvedata import TDClient
 from datetime import datetime, timedelta
@@ -13,11 +14,22 @@ def home(): return "Bot is Live!"
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- إعدادات البوت ---
-TOKEN = os.getenv("8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0")
-API_KEY = os.getenv("5a983de3d79043e9bfb2ec2e8618f905")
+# --- إعدادات البوت المنظفة من أي حروف مخفية ---
+def clean_env(value):
+    if value:
+        return re.sub(r'[^\x20-\x7E]', '', value).strip()
+    return None
+
+TOKEN = clean_env(os.getenv("8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"))
+API_KEY = clean_env(os.getenv("5a983de3d79043e9bfb2ec2e8618f905"))
+
+# التأكد من أن المفاتيح موجودة قبل التشغيل
+if not TOKEN:
+    raise ValueError("TELEGRAM_TOKEN is missing or invalid!")
+
 bot = telebot.TeleBot(TOKEN)
 td = TDClient(apikey=API_KEY)
+
 
 FOREX_PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'GBP/JPY', 'EUR/JPY', 'AUD/JPY', 'USD/CAD', 'EUR/GBP', 'GBP/AUD', 'CAD/JPY', 'CHF/JPY', 'EUR/CAD', 'GBP/CAD']
 
