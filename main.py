@@ -14,7 +14,8 @@ app = Flask('')
 def home(): return "Bot is Live!"
 
 def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
 
 # --- إعدادات البوت ---
 def clean_env(value):
@@ -36,14 +37,13 @@ def analyze_logic(symbols):
             if df is None or df.empty: continue
             df = df.sort_index(ascending=True)
             
-            # حساب المؤشرات الفنية
             df['rsi'] = ta.rsi(df['close'], length=14)
             df['ema200'] = ta.ema(df['close'], length=200)
             
             last_row = df.iloc[-1]
             prev_row = df.iloc[-2]
             
-            score = 60 # نقطة بداية
+            score = 60
             
             if last_row['close'] > last_row['open']:
                 trend = "BUY"
@@ -104,7 +104,7 @@ def handle_gold(message):
 
 def send_formatted_msg(chat_id, s):
     riyadh_time = datetime.utcnow() + timedelta(hours=3)
-    msg = (f"{s['pair']}:\n" # تم حذف كلمة إشارة هنا
+    msg = (f"{s['pair']}:\n"
            f"------------------------------------\n"
            f"{s['emoji']} الاتجاه: {s['trend']}\n💰 السعر: {s['price']:.5f}\n"
            f"قوة الإشارة: {s['rank']} {s['score']}%\n⏱️ الوقت: {s['time']}\n"
@@ -114,11 +114,12 @@ def send_formatted_msg(chat_id, s):
     bot.send_message(chat_id, msg)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    # تشغيل Flask أولاً لفتح المنفذ فوراً
-    t = Thread(target=lambda: app.run(host='0.0.0.0', port=port))
+    # تشغيل السيرفر في خلفية منفصلة
+    t = Thread(target=run)
     t.daemon = True
     t.start()
-    # ثم تشغيل البوت
-    bot.infinity_polling()
-
+    
+    # حذف أي تعارض أو طلبات قديمة (Error 409)
+    bot.remove_webhook()
+    # تشغيل البوت مع تجاهل الطلبات المتراكمة
+    bot.infinity_polling(skip_pending=True)
