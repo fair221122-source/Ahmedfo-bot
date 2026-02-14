@@ -3,5 +3,6 @@ twelvedata
 Flask
 numpy
 pandas
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
+pandas_ta==0.3.14b0
+urllib3==1.26.15
 
