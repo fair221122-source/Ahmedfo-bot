@@ -1,8 +1,6 @@
 pyTelegramBotAPI
 twelvedata
 Flask
-numpy
 pandas
-pandas_ta==0.3.14b0
+numpy
 urllib3==1.26.15
-
