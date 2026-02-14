@@ -114,5 +114,8 @@ def send_formatted_msg(chat_id, s):
     bot.send_message(chat_id, msg)
 
 if __name__ == "__main__":
-    Thread(target=run).start()
+    # تشغيل Flask في الخلفية
+    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))).start()
+    # تشغيل البوت
     bot.infinity_polling()
+
