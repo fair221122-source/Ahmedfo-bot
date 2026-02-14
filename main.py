@@ -5,28 +5,23 @@ from twelvedata import TDClient
 from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
+import pandas as pd
+import pandas_ta as ta
 
-# --- إرضاء ريندر (Web Service) ---
+# --- Flask Server ---
 app = Flask('')
 @app.route('/')
-def home(): 
-    return "Bot is Live!"
+def home(): return "Bot is Live!"
 
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- إعدادات البوت المنظفة ---
+# --- إعدادات البوت ---
 def clean_env(value):
-    if value:
-        return re.sub(r'[^\x20-\x7E]', '', value).strip()
-    return None
+    return re.sub(r'[^\x20-\x7E]', '', value).strip() if value else None
 
 TOKEN = clean_env(os.getenv("TELEGRAM_TOKEN"))
 API_KEY = clean_env(os.getenv("TWELVE_DATA_API"))
-
-if not TOKEN:
-    raise ValueError("TELEGRAM_TOKEN is missing or invalid!")
-
 bot = telebot.TeleBot(TOKEN)
 td = TDClient(apikey=API_KEY)
 
@@ -36,65 +31,87 @@ def analyze_logic(symbols):
     all_results = []
     for s in symbols:
         try:
-            ts = td.time_series(symbol=s, interval="5min", outputsize=20)
+            ts = td.time_series(symbol=s, interval="5min", outputsize=50)
             df = ts.as_pandas()
-            if df is None or df.empty: 
-                continue
+            if df is None or df.empty: continue
             df = df.sort_index(ascending=True)
             
-            recent_15 = df.iloc[-15:]
-            last_4 = df.iloc[-4:]
+            # حساب المؤشرات الفنية
+            df['rsi'] = ta.rsi(df['close'], length=14)
+            df['ema200'] = ta.ema(df['close'], length=200)
             
-            green = len(recent_15[recent_15['close'] > recent_15['open']])
-            red = len(recent_15[recent_15['close'] < recent_15['open']])
-            trend = "BUY" if green > red else "SELL"
+            last_row = df.iloc[-1]
+            prev_row = df.iloc[-2]
             
-            # حساب السكور
-            score = int(((max(green, red)/15)*50) + (abs(last_4['close']-last_4['open']).sum()/(last_4['high']-last_4['low']).sum()*50))
+            score = 60 # نقطة بداية
             
-            # --- التصنيف والوقت حسب طلبك ---
+            if last_row['close'] > last_row['open']:
+                trend = "BUY"
+                score += 15 if prev_row['close'] > prev_row['open'] else 5
+            else:
+                trend = "SELL"
+                score += 15 if prev_row['close'] < prev_row['open'] else 5
+
+            if trend == "BUY" and last_row['rsi'] > 70: score -= 20
+            if trend == "SELL" and last_row['rsi'] < 30: score -= 20
+            
+            candle_body = abs(last_row['close'] - last_row['open'])
+            upper_wick = last_row['high'] - max(last_row['close'], last_row['open'])
+            lower_wick = min(last_row['close'], last_row['open']) - last_row['low']
+            
+            if trend == "BUY" and upper_wick > candle_body: score -= 15
+            if trend == "SELL" and lower_wick > candle_body: score -= 15
+
+            score = max(0, min(100, int(score)))
+
             if score >= 90:
                 rank, trade_time = "ممتازة 🏆", "3 دقائق"
-            elif score >= 80:
+            elif 80 <= score < 90:
                 rank, trade_time = "جيدة جداً ⭐", "3 دقائق"
-            elif score >= 70:
+            elif 70 <= score < 80:
                 rank, trade_time = "جيدة ✅", "5 دقائق"
-            else:
+            elif 60 <= score < 70:
                 rank, trade_time = "ضعيفة ⚠️", "10 دقائق"
+            else:
+                rank, trade_time = "ضعيفة (لا أنصح بالدخول) ❌", "10 دقائق"
 
             all_results.append({
                 "pair": s, "trend": trend, "score": score, "rank": rank, 
-                "time": trade_time, "price": df.iloc[-1]['close'], 
+                "time": trade_time, "price": last_row['close'], 
                 "emoji": "🟢" if trend == "BUY" else "🔴"
             })
-        except: 
-            continue
-    return sorted(all_results, key=lambda x: x['score'], reverse=True)[:3]
+        except: continue
+    return sorted(all_results, key=lambda x: x['score'], reverse=True)
 
-@bot.message_handler(func=lambda message: message.text == "1")
-def handle_message(message):
+@bot.message_handler(func=lambda message: message.text.isdigit() and 1 <= int(message.text) <= 13)
+def handle_numbers(message):
+    count = int(message.text)
     signals = analyze_logic(FOREX_PAIRS)
-    if not signals:
-        bot.reply_to(message, "⚠️ لا توجد إشارات حالياً.")
+    top_signals = signals[:count]
+    if not top_signals:
+        bot.reply_to(message, "⚠️ لا توجد بيانات حالياً.")
         return
+    for s in top_signals:
+        send_formatted_msg(message.chat.id, s)
 
-    # استخدام أول وأقوى إشارة
-    s = signals[0]
+@bot.message_handler(func=lambda message: message.text.lower() == "gold")
+def handle_gold(message):
+    signals = analyze_logic(["XAU/USD"])
+    if signals:
+        send_formatted_msg(message.chat.id, signals[0])
+    else:
+        bot.reply_to(message, "⚠️ تعذر تحليل الذهب.")
+
+def send_formatted_msg(chat_id, s):
     riyadh_time = datetime.utcnow() + timedelta(hours=3)
-    
-    msg = (
-        f"أفضل إشارة متوفرة حاليا:\n"
-        f"------------------------------------\n"
-        f"{s['emoji']} {s['pair']}\n"
-        f"📈 {s['trend']}\n"
-        f"💰 {s['price']:.5f}\n"
-        f"قوة الإشارة: {s['rank']} {s['score']}%\n"
-        f"⏱️ الوقت: {s['time']}\n"
-        f"📅 {riyadh_time.strftime('%Y-%m-%d | %I:%M:%S %p')}\n"
-        f"---------------------------------------\n"
-        f"GOOD LUCK AHMED 👍"
-    )
-    bot.send_message(message.chat.id, msg)
+    msg = (f"{s['pair']}:\n" # تم حذف كلمة إشارة هنا
+           f"------------------------------------\n"
+           f"{s['emoji']} الاتجاه: {s['trend']}\n💰 السعر: {s['price']:.5f}\n"
+           f"قوة الإشارة: {s['rank']} {s['score']}%\n⏱️ الوقت: {s['time']}\n"
+           f"📅 {riyadh_time.strftime('%Y-%m-%d | %I:%M:%S %p')}\n"
+           f"---------------------------------------\n"
+           f"GOOD LUCK AHMED 👍")
+    bot.send_message(chat_id, msg)
 
 if __name__ == "__main__":
     Thread(target=run).start()
