@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
 import pandas as pd
-import pandas_ta as ta
 
 # --- Flask Server ---
 app = Flask('')
