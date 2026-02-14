@@ -42,18 +42,42 @@ def analyze_logic(symbols):
             if df is None or df.empty: continue
             df = df.sort_index(ascending=True)
             
+            # 1. حساب قوة الاتجاه (الشموع الخضراء مقابل الحمراء)
             recent_15 = df.iloc[-15:]
-            last_4 = df.iloc[-4:]
-            
             green = len(recent_15[recent_15['close'] > recent_15['open']])
             red = len(recent_15[recent_15['close'] < recent_15['open']])
+            trend_score = (max(green, red) / 15) * 100
+            
+            # 2. حساب الزخم (قوة الشموع الأخيرة - هل هي ممتلئة أم ذيول فقط؟)
+            last_5 = df.iloc[-5:]
+            body_size = abs(last_5['close'] - last_5['open']).sum()
+            total_range = (last_5['high'] - last_5['low']).sum()
+            momentum_score = (body_size / total_range) * 100 if total_range != 0 else 0
+            
+            # 3. الجودة الحقيقية (دمج الاتجاه مع الزخم بنسبة 60% للاتجاه و 40% للزخم)
+            true_score = int((trend_score * 0.6) + (momentum_score * 0.4))
+            
+            # --- تصنيفاتك الجديدة بدقة ---
+            if true_score >= 90:
+                rank = "ممتازة 🏆"
+            elif 80 <= true_score < 90:
+                rank = "جيدة جداً ⭐"
+            elif 70 <= true_score < 80:
+                rank = "جيدة ✅"
+            elif 60 <= true_score < 70:
+                rank = "ضعيفة ⚠️"
+            else:
+                rank = "ضعيفة (لا أنصح بالدخول) ❌"
+            
             trend = "BUY" if green > red else "SELL"
-            
-            score = int(((max(green, red)/15)*50) + (abs(last_4['close']-last_4['open']).sum()/(last_4['high']-last_4['low']).sum()*50))
-            
-            all_results.append({"pair": s, "trend": trend, "score": score, "price": df.iloc[-1]['close'], "emoji": "🟢" if trend == "BUY" else "🔴"})
+            all_results.append({
+                "pair": s, "trend": trend, "score": true_score, 
+                "rank": rank, "price": df.iloc[-1]['close'], 
+                "emoji": "🟢" if trend == "BUY" else "🔴"
+            })
         except: continue
-    return sorted(all_results, key=lambda x: x['score'], reverse=True)[:1] # يجلب الأفضل فقط
+    return sorted(all_results, key=lambda x: x['score'], reverse=True)
+
 
 @bot.message_handler(func=lambda m: m.text.isdigit() or m.text.lower() == 'gold')
 def handle_request(message):
