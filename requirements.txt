@@ -1,6 +1,7 @@
-pyTelegramBotAPI==4.14.0
-pandas==2.0.3
-twelvedata==1.2.10
-pandas_ta==0.3.14b0
-Flask==2.3.3
+pyTelegramBotAPI
+pandas
+twelvedata
+pandas_ta
+Flask
+numpy
 urllib3==1.26.15
