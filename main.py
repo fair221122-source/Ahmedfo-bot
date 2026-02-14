@@ -1,17 +1,11 @@
 import os
-import pandas as pd
-import asyncio
-from datetime import datetime, timedelta
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import nest_asyncio
+import telebot
 from twelvedata import TDClient
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
+from datetime import datetime, timedelta
 
-# --- الإعدادات ---
-TOKEN = "8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0" 
-API_KEY = "5a983de3d79043e9bfb2ec2e8618f905"
+# سحب المفاتيح من إعدادات GitHub Secrets (أمان عالي)
+TOKEN = os.getenv("8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0")
+API_KEY = os.getenv("5a983de3d79043e9bfb2ec2e8618f905")
 
 FOREX_PAIRS = [
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'GBP/JPY', 'EUR/JPY', 
@@ -19,92 +13,86 @@ FOREX_PAIRS = [
     'CAD/JPY', 'CHF/JPY', 'EUR/CAD', 'GBP/CAD'
 ]
 
+bot = telebot.TeleBot(TOKEN)
 td = TDClient(apikey=API_KEY)
 
-# --- سيرفر وهمي لـ Render (Health Check) ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is Running Successfully")
+def check_market_news():
+    now = datetime.utcnow() + timedelta(hours=3)
+    # تنبيه آلي في أوقات الأخبار والسيولة (لندن ونيويورك)
+    if (10 <= now.hour <= 12) or (15 <= now.hour <= 17):
+        return "⚠️ انصح بعدم التداول الآن: يوجد أخبار قوية وتذبذب عالي في السوق."
+    return None
 
-def run_health_server():
-    # Render يرسل رقم البورت في متغير بيئة يسمى PORT
-    # إذا لم يجده، سيستخدم 10000 كخيار احتياطي
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    print(f"📡 السيرفر الوهمي يعمل الآن على البورت: {port}")
-    server.serve_forever()
+def analyze_logic(symbols, count=1):
+    all_results = []
+    for s in symbols:
+        try:
+            ts = td.time_series(symbol=s, interval="5min", outputsize=20)
+            df = ts.as_pandas().sort_index(ascending=True)
+            if df.empty: continue
+            
+            recent_15 = df.iloc[-15:]
+            last_4 = df.iloc[-4:]
+            
+            # حساب الزخم (آخر 15)
+            green = len(recent_15[recent_15['close'] > recent_15['open']])
+            red = len(recent_15[recent_15['close'] < recent_15['open']])
+            trend = "BUY" if green > red else "SELL"
+            dom_ratio = (max(green, red) / 15) * 100
 
+            # قياس الارتدادات (آخر 4)
+            total_bodies = abs(last_4['close'] - last_4['open']).sum()
+            total_range = (last_4['high'] - last_4['low']).sum()
+            body_health = (total_bodies / total_range * 100) if total_range > 0 else 0
+            
+            score = int((dom_ratio * 0.5) + (body_health * 0.5))
+            
+            all_results.append({
+                "pair": s, "trend": trend, "score": score, 
+                "price": df.iloc[-1]['close'], "emoji": "🟢" if trend == "BUY" else "🔴"
+            })
+        except: continue
+    return sorted(all_results, key=lambda x: x['score'], reverse=True)[:count]
 
-# --- منطق التحليل المعدل ---
-def analyze_strategy(pair):
-    try:
-        ts = td.time_series(symbol=pair, interval="5min", outputsize=40)
-        df = ts.as_pandas()
-        if df.empty or len(df) < 30: return None
-        df = df.sort_index(ascending=True)
-        lookback = df.iloc[-31:-1].copy()
-        
-        green_count = len(lookback[lookback['close'] > lookback['open']])
-        red_count = len(lookback[lookback['close'] < lookback['open']])
-        
-        if green_count >= 18:
-            trend, dom_ratio = "BUY", green_count / 30
-        elif red_count >= 18:
-            trend, dom_ratio = "SELL", red_count / 30
-        else:
-            return None
+@bot.message_handler(func=lambda message: message.text.isdigit())
+def handle_forex(message):
+    num = int(message.text)
+    signals = analyze_logic(FOREX_PAIRS, num)
+    send_signals(message.chat.id, signals)
 
-        target_candles = lookback[lookback['close'] > lookback['open']] if trend == "BUY" else lookback[lookback['close'] < lookback['open']]
-        body_eff = (abs(target_candles['close'] - target_candles['open']) / (target_candles['high'] - target_candles['low'])).mean() * 100
-        score = int((dom_ratio * 50) + (body_eff * 0.5))
-        
-        if score >= 85: label, expiry = "ممتااازة", "3 دقائق"
-        elif score >= 70: label, expiry = "جيدة جداً", "3 دقائق"
-        elif score >= 65: label, expiry = "جيدة", "5 دقائق"
-        elif score >= 40: label, expiry = "مقبولة", "7 دقائق"
-        else: label, expiry = "ضعيفة", "10 دقائق"
+@bot.message_handler(func=lambda message: message.text.lower() == 'gold')
+def handle_gold(message):
+    signals = analyze_logic(['GOLD'], 1)
+    send_signals(message.chat.id, signals)
 
-        return {"pair": pair, "trend": trend, "score": score, "label": label, "expiry": expiry, "price": float(df['close'].iloc[-1]), "emoji": "🟢" if trend == "BUY" else "🔴"}
-    except: return None
-
-async def start_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("بدأت فحص الـ 13 زوجاً.. سأستغرق دقيقتين لتجنب الحظر ⏳")
-    all_signals = []
-    riyadh_time = datetime.utcnow() + timedelta(hours=3)
-    
-    for pair in FOREX_PAIRS:
-        res = analyze_strategy(pair)
-        if res: all_signals.append(res)
-        await asyncio.sleep(9.0) 
-
-    all_signals = sorted(all_signals, key=lambda x: x['score'], reverse=True)[:3]
-    if not all_signals:
-        await update.message.reply_text("عفواً ... لا توجد إشارات قوية حالياً.")
+def send_signals(chat_id, signals):
+    if not signals:
+        bot.send_message(chat_id, "❌ لم يتم العثور على إشارات قوية الآن.")
         return
+    
+    riyadh_time = datetime.utcnow() + timedelta(hours=3)
+    news_note = check_market_news()
 
-    response = "🎯 أفضل 3 إشارات متوفرة حالياً:\n----------------------------------------\n"
-    for s in all_signals:
-        response += f"{s['emoji']} {s['pair']}\n📈 {s['trend']}\n💰 {s['price']:.5f} (مطابق)\n💪 قوة الإشارة: {s['label']} {s['score']}%\n⏱️ الوقت: {s['expiry']}\n📅 {riyadh_time.strftime('%Y-%m-%d')} | {riyadh_time.strftime('%I:%M:%S %p')}\n----------------------------------------\n"
-    response += "GOOD LUCK AHMED 👍"
-    await update.message.reply_text(response)
+    for s in signals:
+        label = "ممتازة" if s['score'] >= 85 else "جيدة جداً" if s['score'] >= 75 else "جيدة"
+        header = "أفضل إشارة متوفرة حاليا من بين 13 زوج فوركس:" if s['pair'] != 'GOLD' else "تحليل خاص لمعدن الذهب:"
+        
+        response = (
+            f"{header}\n"
+            f"------------------------------------\n"
+            f"{s['emoji']} {s['pair']}\n"
+            f"📈 {s['trend']}\n"
+            f"💰 {s['price']:.5f}\n"
+            f"قوة الإشارة: {label} {s['score']}%\n"
+            f"⏱️ الوقت: 3 دقائق\n"
+            f"📅 {riyadh_time.strftime('%Y-%m-%d | %I:%M:%S %p')}\n"
+            f"---------------------------------------\n"
+        )
+        if news_note:
+            response += f"{news_note}\n---------------------------------------\n"
+        response += "GOOD LUCK AHMED 👍"
+        bot.send_message(chat_id, response)
 
-if __name__ == '__main__':
-    # تشغيل سيرفر الـ Health Check
-    threading.Thread(target=run_health_server, daemon=True).start()
+if __name__ == "__main__":
+    bot.infinity_polling()
     
-    # تهيئة بيئة العمل
-    nest_asyncio.apply()
-    
-    # بناء التطبيق
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # إضافة الأوامر
-    application.add_handler(CommandHandler('start', start_analysis))
-    application.add_handler(CommandHandler('signals', start_analysis))
-    
-    print("🚀 البوت ينطلق الآن على نسخة مستقرة...")
-    
-    # تشغيل البوت مع إعدادات حماية من أخطاء الاتصال
-    application.run_polling(drop_pending_updates=True, stop_signals=None)
