@@ -20,8 +20,8 @@ def clean_env(value):
         return re.sub(r'[^\x20-\x7E]', '', value).strip()
     return None
 
-TOKEN = clean_env(os.getenv("8433924343:AAEzACCdtfJK_lwof5vbCbCGAavxi_w5iV0"))
-API_KEY = clean_env(os.getenv("5a983de3d79043e9bfb2ec2e8618f905"))
+TOKEN = clean_env(os.getenv("TELEGRAM_TOKEN"))
+API_KEY = clean_env(os.getenv("TWELVE_DATA_API"))
 
 # التأكد من أن المفاتيح موجودة قبل التشغيل
 if not TOKEN:
