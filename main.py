@@ -32,13 +32,21 @@ def analyze_logic(symbols):
     all_results = []
     for s in symbols:
         try:
+            # تقليل الحجم لضمان الاستجابة السريعة
             ts = td.time_series(symbol=s, interval="5min", outputsize=50)
             df = ts.as_pandas()
             if df is None or df.empty: continue
             df = df.sort_index(ascending=True)
             
-            df['rsi'] = ta.rsi(df['close'], length=14)
-            df['ema200'] = ta.ema(df['close'], length=200)
+            # --- حساب EMA 200 يدوياً (بديل للمكتبة المحذوفة) ---
+            df['ema200'] = df['close'].ewm(span=200, min_periods=1, adjust=False).mean()
+            
+            # --- حساب RSI يدوياً (بديل للمكتبة المحذوفة) ---
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14, min_periods=1).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
             
             last_row = df.iloc[-1]
             prev_row = df.iloc[-2]
@@ -64,24 +72,21 @@ def analyze_logic(symbols):
 
             score = max(0, min(100, int(score)))
 
-            if score >= 90:
-                rank, trade_time = "ممتازة 🏆", "3 دقائق"
-            elif 80 <= score < 90:
-                rank, trade_time = "جيدة جداً ⭐", "3 دقائق"
-            elif 70 <= score < 80:
-                rank, trade_time = "جيدة ✅", "5 دقائق"
-            elif 60 <= score < 70:
-                rank, trade_time = "ضعيفة ⚠️", "10 دقائق"
-            else:
-                rank, trade_time = "ضعيفة (لا أنصح بالدخول) ❌", "10 دقائق"
+            if score >= 90: rank, t_time = "ممتازة 🏆", "3 دقائق"
+            elif 80 <= score < 90: rank, t_time = "جيدة جداً ⭐", "3 دقائق"
+            elif 70 <= score < 80: rank, t_time = "جيدة ✅", "5 دقائق"
+            else: rank, t_time = "ضعيفة ⚠️", "10 دقائق"
 
             all_results.append({
                 "pair": s, "trend": trend, "score": score, "rank": rank, 
-                "time": trade_time, "price": last_row['close'], 
+                "time": t_time, "price": last_row['close'], 
                 "emoji": "🟢" if trend == "BUY" else "🔴"
             })
-        except: continue
+        except Exception as e:
+            print(f"Error: {e}")
+            continue
     return sorted(all_results, key=lambda x: x['score'], reverse=True)
+
 
 @bot.message_handler(func=lambda message: message.text.isdigit() and 1 <= int(message.text) <= 13)
 def handle_numbers(message):
