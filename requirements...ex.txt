@@ -1,6 +1,0 @@
-pyTelegramBotAPI
-twelvedata
-Flask
-pandas
-numpy
-urllib3==1.26.15
