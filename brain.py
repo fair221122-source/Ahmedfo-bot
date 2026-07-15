@@ -77,9 +77,20 @@ def _load():
         with open(DB_FILE,"r",encoding="utf-8") as f: return json.load(f)
     except: return _empty()
 
+def _atomic_write(path, write_func):
+    """كتابة آمنة: تُكتب البيانات في ملف مؤقت أولاً، ثم يُستبدل الملف الأصلي
+    دفعة واحدة (os.replace). هذا يمنع تلف trades_db.json / open_trades.json
+    لو تم إيقاف العملية فجأة أثناء الكتابة (إعادة نشر، نفاد ذاكرة، إلخ) —
+    فإما أن تنجح الكتابة بالكامل، أو يبقى الملف القديم سليماً كما هو."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        write_func(f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
 def _save(db):
-    with open(DB_FILE,"w",encoding="utf-8") as f:
-        json.dump(db,f,ensure_ascii=False,separators=(',',':'))
+    _atomic_write(DB_FILE, lambda f: json.dump(db,f,ensure_ascii=False,separators=(',',':')))
     n=len(db["trades"])
     if n>0 and n%10_000==0:
         arc=DB_FILE.replace(".json",f"_arc{n}.json.gz")
@@ -363,8 +374,7 @@ def get_backtest(): return _load().get("backtest",{})
 def save_open(trades):
     with _OPEN_LOCK:
         try:
-            with open(OP_FILE,"w",encoding="utf-8") as f:
-                json.dump(trades,f,ensure_ascii=False,indent=2)
+            _atomic_write(OP_FILE, lambda f: json.dump(trades,f,ensure_ascii=False,indent=2))
         except Exception as e: print(f"save_open error: {e}")
 
 def load_open():

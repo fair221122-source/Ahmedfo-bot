@@ -1281,36 +1281,43 @@ def mon_loop():
         time.sleep(MON_SEC)
         if not ST['open_trades']: continue
         updated=[]
-        for t in ST['open_trades']:
-            p=price(t['symbol'])
-            if not p: updated.append(t); continue
-            t['current']=fmt(p)
-            buy=t['direction']=='BUY'
-            entry=t['_ef']; sl=t['_sl']; tp=t['_tp']; tp1=t['_tp1']
-            t['pnl']=round(((p-entry)/entry*100) if buy else ((entry-p)/entry*100),2)
-            hit_tp  =(buy and p>=tp)  or (not buy and p<=tp)
-            hit_sl  =(buy and p<=sl)  or (not buy and p>=sl)
-            hit_tp1 =(buy and p>=tp1) or (not buy and p<=tp1)
-            if hit_tp and not t.get('hit_tp'):
-                t['hit_tp']=True; t['status']='tp'
-                _notify(t,'tp',f"🏆 الهدف (1:3) تحقق!\n{t['symbol']} @ {fmt(p)}\nربح: {t['pnl']}%",True)
-            elif hit_sl and not t.get('hit_sl'):
-                t['hit_sl']=True; t['status']='sl'
-                _notify(t,'sl',f"🛑 استوب!\n{t['symbol']} @ {fmt(p)}\nخسارة: {t['pnl']}%",True)
-            elif hit_tp1 and not t.get('hit_tp1'):
-                t['hit_tp1']=True
-                _notify(t,'tp1',
-                    f"✅ هدف جزئي تحقق! (متابعة)\n{t['symbol']} @ {fmt(p)}\n"
-                    f"ربح حالي: {t['pnl']}%\n"
-                    f"💡 Trailing Stop: حرّك الاستوب إلى الدخول {t['entry']} (التعادل)\n"
-                    f"⏳ بانتظار الهدف النهائي 1:3",False)
-            if t.get('hit_tp') or t.get('hit_sl'):
-                t.setdefault('_rm',time.time()+180)
-            if t.get('_rm') and time.time()>t['_rm']: continue
-            updated.append(t)
-        ST['open_trades']=updated
-        if BRAIN_OK: brain.save_open(updated)
-        sio.emit('state_update',get_st())
+        try:
+            for t in ST['open_trades']:
+                try:
+                    p=price(t['symbol'])
+                    if not p: updated.append(t); continue
+                    t['current']=fmt(p)
+                    buy=t['direction']=='BUY'
+                    entry=t['_ef']; sl=t['_sl']; tp=t['_tp']; tp1=t['_tp1']
+                    t['pnl']=round(((p-entry)/entry*100) if buy else ((entry-p)/entry*100),2)
+                    hit_tp  =(buy and p>=tp)  or (not buy and p<=tp)
+                    hit_sl  =(buy and p<=sl)  or (not buy and p>=sl)
+                    hit_tp1 =(buy and p>=tp1) or (not buy and p<=tp1)
+                    if hit_tp and not t.get('hit_tp'):
+                        t['hit_tp']=True; t['status']='tp'
+                        _notify(t,'tp',f"🏆 الهدف (1:3) تحقق!\n{t['symbol']} @ {fmt(p)}\nربح: {t['pnl']}%",True)
+                    elif hit_sl and not t.get('hit_sl'):
+                        t['hit_sl']=True; t['status']='sl'
+                        _notify(t,'sl',f"🛑 استوب!\n{t['symbol']} @ {fmt(p)}\nخسارة: {t['pnl']}%",True)
+                    elif hit_tp1 and not t.get('hit_tp1'):
+                        t['hit_tp1']=True
+                        _notify(t,'tp1',
+                            f"✅ هدف جزئي تحقق! (متابعة)\n{t['symbol']} @ {fmt(p)}\n"
+                            f"ربح حالي: {t['pnl']}%\n"
+                            f"💡 Trailing Stop: حرّك الاستوب إلى الدخول {t['entry']} (التعادل)\n"
+                            f"⏳ بانتظار الهدف النهائي 1:3",False)
+                    if t.get('hit_tp') or t.get('hit_sl'):
+                        t.setdefault('_rm',time.time()+180)
+                    if t.get('_rm') and time.time()>t['_rm']: continue
+                    updated.append(t)
+                except Exception as e:
+                    log.error(f"mon_loop trade {t.get('symbol','?')}: {e}")
+                    updated.append(t)  # نُبقي الصفقة كما هي بدل فقدانها بسبب خطأ عابر
+            ST['open_trades']=updated
+            if BRAIN_OK: brain.save_open(updated)
+            sio.emit('state_update',get_st())
+        except Exception as e:
+            log.error(f"mon_loop: {e}")
 
 # ═══════════════════════════════════════════
 #  التعلم الدوري (إصلاح #5: يتحقق فوراً عند البدء، ثم كل ساعة)
@@ -1566,4 +1573,4 @@ if __name__=='__main__':
     threading.Thread(target=ka_loop,    daemon=True).start()
     threading.Thread(target=_poll_tg,   daemon=True).start()
     port=int(os.environ.get("PORT",5000))
-    sio.run(app,host='0.0.0.0',port=port,debug=False)
+    sio.run(app,host='0.0.0.0',port=port,debug=False,allow_unsafe_werkzeug=True)
