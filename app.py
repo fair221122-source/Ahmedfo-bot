@@ -84,6 +84,26 @@
     الانعكاس → سحب سيولة (BSL/SSL) → عودة لمنطقة Order Block → استمرار
     الحركة. كل عنصر من هذا التسلسل ممثَّل الآن في الكود (سحب السيولة،
     OB، وCHoCh كعامل سياق يؤكد لحظة الانقلاب قبل تشكّل الـOB).
+
+═══════════════════════════════════════════════════════════
+سجل التعديلات (نسخة v5 — تبديل مصدر البيانات من Binance إلى Kraken):
+═══════════════════════════════════════════════════════════
+17) استبدال مصدر البيانات بالكامل من Binance Futures (fapi.binance.com،
+    كان يرجع خطأ 451 Unavailable For Legal Reasons بسبب حظر جغرافي على
+    IP سيرفرات الاستضافة) إلى Kraken Public API (api.kraken.com) —
+    منصة لا تحظر الوصول العام لبيانات الشموع/الأسعار. لا تغيير على أي
+    منطق تحليل أو شروط دخول، فقط دوال جلب البيانات الثلاث تغيّرت:
+    klines() و price() و top_symbols().
+18) ملاحظة مهمة: عقود Kraken العامة (OHLC endpoint) لا توفّر "حجم
+    الشراء المُنفَّذ" (taker buy volume) بشكل منفصل عن حجم البيع كما
+    توفره Binance Futures. لذلك حساب CVD (calc_cvd_24h) أصبح يعتمد على
+    تقريب واقعي: حجم الشمعة الصاعدة (close>=open) بالكامل يُحتسب "شراء"،
+    والهابطة صفر — نفس بنية دالة calc_cvd_24h ومخرجاتها لم تتغيّر، فقط
+    مصدر حقل "tb" داخل klines() تغيّر لأنه غير متاح من Kraken مباشرة.
+19) رموز العملات الآن بصيغة Kraken (مثال: XBTUSDT بدل BTCUSDT) لأن
+    Kraken تستخدم "XBT" بدل "BTC". تم تعريف ثابت BTC_PAIR ليحل محل أي
+    استخدام صريح لـ"BTCUSDT" في الكود (كان يُستخدم فقط في run_scan()
+    لجلب بيانات BTC للمقارنة/الارتباط COR).
 """
 
 import os,sys,time,json,math,threading,logging,requests
@@ -101,7 +121,8 @@ except: BRAIN_OK=False
 # ═══════════════════════════════════════════
 TG_TOKEN  = os.environ.get("TG_TOKEN", "")   # يُقرأ من متغيرات البيئة (Render/GitHub) وليس من الكود
 TG_CHAT   = os.environ.get("TG_CHAT", "")    # نفس الشيء — لا تضع القيمة الحقيقية هنا
-BINANCE   = "https://fapi.binance.com"
+KRAKEN    = "https://api.kraken.com/0/public"   # إصلاح #17: بدل Binance (fapi.binance.com) بسبب حظر 451
+BTC_PAIR  = "XBTUSDT"    # إصلاح #19: زوج BTC/USDT بصيغة Kraken (XBT بدل BTC)
 COOLDOWN  = 15          # دقيقة
 INTERVAL  = 300         # 5 دقائق
 TOP_N     = 30          # أعلى 30 عملة سيولة + أعلى 30 عملة CVD+COR (بطلب صريح)
@@ -598,36 +619,79 @@ setInterval(()=>{fetch('/ping').catch(()=>{});},240000);
 """
 
 # ═══════════════════════════════════════════
-#  Binance API
+#  Kraken API (إصلاح #17: بديل Binance بسبب حظر 451 الجغرافي)
 # ═══════════════════════════════════════════
+
+def _kraken_interval(tf):
+    """يحوّل رمز الفريم (4h/1h/15m) إلى الدقائق التي تطلبها Kraken فعلياً."""
+    return {"4h":240,"1h":60,"15m":15}.get(tf,60)
 
 def klines(sym,tf,n=200):
     try:
-        r=_HTTP.get(f"{BINANCE}/fapi/v1/klines",
-            params={"symbol":sym,"interval":tf,"limit":n},timeout=7)
-        # إصلاح #3: نضيف taker_buy_base ('tb') لحساب CVD تراكمي حقيقي لاحقاً
-        return [{"o":float(k[1]),"h":float(k[2]),"l":float(k[3]),
-                 "c":float(k[4]),"v":float(k[5]),"t":k[0],"tb":float(k[9])} for k in r.json()]
-    except: return []
+        interval=_kraken_interval(tf)
+        r=_HTTP.get(f"{KRAKEN}/OHLC",params={"pair":sym,"interval":interval},timeout=7)
+        data=r.json()
+        if data.get("error"):
+            log.error(f"klines {sym} {tf}: Kraken رجّع خطأ — {data['error']}")
+            return []
+        result=data.get("result",{})
+        key=next((k for k in result if k!="last"),None)
+        if not key: return []
+        rows=result[key][-n:]
+        out=[]
+        for row in rows:
+            t,o,h,l,c,vwap,vol,count=row
+            o_f=float(o); c_f=float(c); v_f=float(vol)
+            # إصلاح #18: Kraken لا توفّر "حجم الشراء المُنفَّذ" منفصلاً عن حجم
+            # البيع داخل الشمعة كما توفره Binance Futures (حقل tb الأصلي).
+            # تقريب واقعي: الشمعة الصاعدة (close>=open) تُحتسب حجمها بالكامل
+            # كـ"شراء"، والهابطة صفر — يبقي دالة calc_cvd_24h تعمل بنفس بنيتها.
+            tb=v_f if c_f>=o_f else 0.0
+            out.append({"o":o_f,"h":float(h),"l":float(l),"c":c_f,"v":v_f,"t":int(float(t))*1000,"tb":tb})
+        return out
+    except Exception as e:
+        log.error(f"klines {sym} {tf}: {e}")
+        return []
 
 def price(sym):
     try:
-        r=_HTTP.get(f"{BINANCE}/fapi/v1/ticker/price",params={"symbol":sym},timeout=4)
-        return float(r.json()['price'])
+        r=_HTTP.get(f"{KRAKEN}/Ticker",params={"pair":sym},timeout=4)
+        data=r.json()
+        if data.get("error"): return None
+        result=data.get("result",{})
+        key=next((k for k in result if k!="last"),None)
+        if not key: return None
+        return float(result[key]["c"][0])   # آخر سعر تنفيذ
     except: return None
 
 def top_symbols(n=TOP_N):
     try:
-        r=_HTTP.get(f"{BINANCE}/fapi/v1/ticker/24hr",timeout=10)
-        if r.status_code!=200:
-            log.error(f"top_symbols: Binance رجّع كود {r.status_code} — المحتوى: {r.text[:200]}")
+        rp=_HTTP.get(f"{KRAKEN}/AssetPairs",timeout=10)
+        pdata=rp.json()
+        if pdata.get("error"):
+            log.error(f"top_symbols: Kraken (AssetPairs) رجّع خطأ — {pdata['error']}")
             return []
-        d=[x for x in r.json() if x['symbol'].endswith('USDT')
-           and x['symbol'] not in ('USDCUSDT','BUSDUSDT','TUSDUSDT','FDUSDUSDT')]
-        d.sort(key=lambda x:float(x.get('quoteVolume',0)),reverse=True)
-        return [x['symbol'] for x in d[:n]]
+        # كل أزواج USDT العامة (نستثني عملات مستقرة أخرى مقابل USDT، غير مفيدة كإشارات اتجاه)
+        excl=("USDCUSDT","DAIUSDT","TUSDUSDT","FDUSDUSDT")
+        all_pairs=[k for k in pdata.get("result",{}) if k.endswith("USDT") and k not in excl]
+        vols={}
+        batch=15   # Kraken تحدّ عدد الأزواج بالطلب الواحد؛ نُجزّئها لدفعات آمنة
+        for i in range(0,len(all_pairs),batch):
+            chunk=all_pairs[i:i+batch]
+            try:
+                rt=_HTTP.get(f"{KRAKEN}/Ticker",params={"pair":",".join(chunk)},timeout=10)
+                td=rt.json()
+                if td.get("error"): continue
+                for k,info in td.get("result",{}).items():
+                    try:
+                        vol24=float(info["v"][1]); last=float(info["c"][0])
+                        vols[k]=vol24*last   # تقريب لحجم التداول بالدولار (شبيه quoteVolume)
+                    except: continue
+            except Exception: continue
+        ranked=sorted(vols.items(),key=lambda x:x[1],reverse=True)
+        return [k for k,_ in ranked[:n]]
     except Exception as e:
-        log.error(f"top_symbols: فشل الاتصال بـ Binance — {e}")
+        log.error(f"top_symbols: فشل الاتصال بـ Kraken — {e}")
         return []
 
 # ═══════════════════════════════════════════
@@ -1424,7 +1488,7 @@ def run_scan():
     elog("🔍 بدء الفحص...","info")
     try:
         syms=top_symbols(TOP_N); ST['top_symbols']=syms
-        btc_c=klines("BTCUSDT","1h",25)
+        btc_c=klines(BTC_PAIR,"1h",25)
         elog("📊 تحليل CVD (24س) + COR (متوازي)...","info")
         cvd_top,cvd_raw=get_cvd_top(syms,btc_c)
         ST['cvd_top']=cvd_top
@@ -1554,13 +1618,13 @@ def on_toggle():
 
 if __name__=='__main__':
     print("╔══════════════════════════════════════════════════╗")
-    print("║   🚀 CryptoBot Pro — تحليل فني متكامل (v3)       ║")
+    print("║   🚀 CryptoBot Pro — تحليل فني متكامل (v5)       ║")
     print("╠══════════════════════════════════════════════════╣")
     print(f"║  🌐 PORT: {os.environ.get('PORT','5000')}                                ║")
     print("║  📊 4H اتجاه فقط → 1H سيولة+FVG+OB → 15M دخول BOS/CISD ║")
-    print("║  📈 CVD(24س حقيقي) + COR + Cluster + Kill Zones  ║")
+    print("║  📈 CVD(24س تقريبي) + COR + Cluster + Kill Zones  ║")
     print("║  🧠 Brain: ~120 صفقة + تعلم حقيقي مؤثر بالقرار    ║")
-    print("║  ✅ حد الثقة 75% حقيقي | R:R 1:3 | أعلى 10 سيولة  ║")
+    print("║  ✅ حد الثقة 75% حقيقي | R:R 1:3 | مصدر: Kraken   ║")
     print("╚══════════════════════════════════════════════════╝")
     if not TG_TOKEN or not TG_CHAT:
         log.warning("⚠️ لم يتم ضبط TG_TOKEN / TG_CHAT كمتغيرات بيئة — رسائل تيليجرام لن تُرسل حتى تُضبط في إعدادات Render (Environment).")
