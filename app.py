@@ -619,11 +619,16 @@ def price(sym):
 def top_symbols(n=TOP_N):
     try:
         r=_HTTP.get(f"{BINANCE}/fapi/v1/ticker/24hr",timeout=10)
+        if r.status_code!=200:
+            log.error(f"top_symbols: Binance رجّع كود {r.status_code} — المحتوى: {r.text[:200]}")
+            return []
         d=[x for x in r.json() if x['symbol'].endswith('USDT')
            and x['symbol'] not in ('USDCUSDT','BUSDUSDT','TUSDUSDT','FDUSDUSDT')]
         d.sort(key=lambda x:float(x.get('quoteVolume',0)),reverse=True)
         return [x['symbol'] for x in d[:n]]
-    except: return []
+    except Exception as e:
+        log.error(f"top_symbols: فشل الاتصال بـ Binance — {e}")
+        return []
 
 # ═══════════════════════════════════════════
 #  مؤشرات تقنية
