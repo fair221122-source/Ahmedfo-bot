@@ -5,7 +5,7 @@
 ║  CryptoBot Pro — تحليل فني متكامل (نسخة مُصلَحة)        ║
 ║  4H اتجاه | 1H سيولة+OB+FVG | 15M دخول بعد BOS/CISD      ║
 ║  CVD (24 ساعة حقيقي) + COR + Cluster + Sessions          ║
-║  pip install flask flask-socketio requests eventlet      ║
+║  pip install -r requirements.txt                          ║
 ╚══════════════════════════════════════════════════════════╝
 
 ═══════════════════════════════════════════════════════════
@@ -86,24 +86,27 @@
     OB، وCHoCh كعامل سياق يؤكد لحظة الانقلاب قبل تشكّل الـOB).
 
 ═══════════════════════════════════════════════════════════
-سجل التعديلات (نسخة v5 — تبديل مصدر البيانات من Binance إلى Kraken):
+سجل التعديلات (نسخة v6 — مصدر بيانات متعدد الطبقات + سيولة حقيقية):
 ═══════════════════════════════════════════════════════════
-17) استبدال مصدر البيانات بالكامل من Binance Futures (fapi.binance.com،
-    كان يرجع خطأ 451 Unavailable For Legal Reasons بسبب حظر جغرافي على
-    IP سيرفرات الاستضافة) إلى Kraken Public API (api.kraken.com) —
-    منصة لا تحظر الوصول العام لبيانات الشموع/الأسعار. لا تغيير على أي
-    منطق تحليل أو شروط دخول، فقط دوال جلب البيانات الثلاث تغيّرت:
-    klines() و price() و top_symbols().
-18) ملاحظة مهمة: عقود Kraken العامة (OHLC endpoint) لا توفّر "حجم
-    الشراء المُنفَّذ" (taker buy volume) بشكل منفصل عن حجم البيع كما
-    توفره Binance Futures. لذلك حساب CVD (calc_cvd_24h) أصبح يعتمد على
-    تقريب واقعي: حجم الشمعة الصاعدة (close>=open) بالكامل يُحتسب "شراء"،
-    والهابطة صفر — نفس بنية دالة calc_cvd_24h ومخرجاتها لم تتغيّر، فقط
-    مصدر حقل "tb" داخل klines() تغيّر لأنه غير متاح من Kraken مباشرة.
-19) رموز العملات الآن بصيغة Kraken (مثال: XBTUSDT بدل BTCUSDT) لأن
-    Kraken تستخدم "XBT" بدل "BTC". تم تعريف ثابت BTC_PAIR ليحل محل أي
-    استخدام صريح لـ"BTCUSDT" في الكود (كان يُستخدم فقط في run_scan()
-    لجلب بيانات BTC للمقارنة/الارتباط COR).
+20) مصدر البيانات أصبح بنظام تبديل تلقائي كامل بدل مصدر واحد ثابت:
+    OKX Public Futures (مباشر ثم عبر أي بروكسيات تُضاف) كأولوية أولى،
+    وعند فشل كل مساراتها بالكامل → Binance Futures العام تلقائياً
+    (مباشر ثم عبر بروكسياته). آخر مسار ناجح يُحفظ ويُستخدم كمسار سريع،
+    ويُعاد اكتشاف أفضل مسار متاح تلقائياً كل مرة يفشل فيها المسار
+    المحفوظ — لا حاجة لأي تدخل يدوي عند حظر أي مزوّد. عناوين البروكسيات
+    (حتى 10 لكل مزوّد) تُقرأ من متغيرات بيئة (OKX_PROXY_URLS,
+    BINANCE_PROXY_URLS) كقائمة مفصولة بفواصل — إضافة/حذف بروكسي لا
+    يتطلب أي تعديل بالكود إطلاقاً.
+21) سحب السيولة (find_liq_sweep) كان يختار "أقرب قمة/قاع سعرياً" للسعر
+    الحالي من بين كل القمم/القيعان المكتشفة، وقد لا تكون فعلياً "القمة
+    السابقة" أو "القاع السابق" بالمعنى الهيكلي الصحيح (قد تكون قمة أقدم
+    بمصادفة قريبة بالسعر). الآن يُلزَم استخدام آخر قمة سابقة فعلية
+    (للبيع) أو آخر قاع سابق فعلي (للشراء) بالترتيب الزمني تحديداً —
+    سيولة حقيقية بالمعنى الذي يقصده أي متداول، وليس تطابقاً سعرياً
+    عشوائياً.
+22) INTERVAL (فاصل الفحص الآلي) من 5 دقائق إلى 10 دقائق، وTOP_N (عدد
+    العملات المرشحة بالسيولة) من 30 إلى 10 — لتقليل عدد الطلبات لكل
+    دورة فحص ويبقى الحمل على أي مزوّد/بروكسي ضمن حد معقول جداً.
 """
 
 import os,sys,time,json,math,threading,logging,requests
@@ -121,11 +124,32 @@ except: BRAIN_OK=False
 # ═══════════════════════════════════════════
 TG_TOKEN  = os.environ.get("TG_TOKEN", "")   # يُقرأ من متغيرات البيئة (Render/GitHub) وليس من الكود
 TG_CHAT   = os.environ.get("TG_CHAT", "")    # نفس الشيء — لا تضع القيمة الحقيقية هنا
-KRAKEN    = "https://api.kraken.com/0/public"   # إصلاح #17: بدل Binance (fapi.binance.com) بسبب حظر 451
-BTC_PAIR  = "XBTUSDT"    # إصلاح #19: زوج BTC/USDT بصيغة Kraken (XBT بدل BTC)
+
+# إصلاح #20: مصدر البيانات أصبح متعدد الطبقات مع تبديل تلقائي كامل عند الحظر:
+# 1) OKX Public Futures (Swap) مباشرة، ثم عبر أي بروكسيات OKX مُضافة.
+# 2) عند فشل كل مسارات OKX → Binance Public Futures مباشرة، ثم عبر بروكسياتها.
+# البروكسيات تُقرأ من متغيرات بيئة (قائمة روابط مفصولة بفواصل) — لا حاجة
+# لتعديل الكود عند إضافة/حذف بروكسي؛ فقط تُضاف كمتغير بيئة في Render.
+OKX_DIRECT      = "https://www.okx.com"
+BINANCE_DIRECT  = "https://fapi.binance.com"
+OKX_PROXIES     = [u.strip() for u in os.environ.get("OKX_PROXY_URLS","").split(",") if u.strip()]
+BINANCE_PROXIES = [u.strip() for u in os.environ.get("BINANCE_PROXY_URLS","").split(",") if u.strip()]
+
+# ترتيب المزوّدين: كل مزوّد معه قائمة "قواعد" (مباشر + بروكسياته) تُجرَّب بالترتيب.
+PROVIDERS = [
+    {"name":"okx",     "bases":[OKX_DIRECT]+OKX_PROXIES},
+    {"name":"binance", "bases":[BINANCE_DIRECT]+BINANCE_PROXIES},
+]
+# آخر مسار (مزوّد+قاعدة) نجح فعلياً — يُستخدم كمسار سريع بدل إعادة تجربة
+# كل شيء من الصفر في كل طلب؛ لو فشل هذا المسار المحفوظ، تُعاد المحاولة
+# الكاملة من أول مزوّد (OKX) تلقائياً، فيتعافى النظام تلقائياً لو رجع
+# المزوّد الأفضل يعمل من جديد دون أي تدخل يدوي.
+_ACTIVE = {"provider": None, "base": None}
+_ACTIVE_LOCK = threading.Lock()
+
 COOLDOWN  = 15          # دقيقة
-INTERVAL  = 300         # 5 دقائق
-TOP_N     = 30          # أعلى 30 عملة سيولة + أعلى 30 عملة CVD+COR (بطلب صريح)
+INTERVAL  = 600         # 10 دقائق (كان 5) — لتقليل عدد الطلبات وتفادي أي حدود معدل
+TOP_N     = 10          # أعلى 10 عملات بالسيولة (حجم التداول) آخر 24 ساعة — حد معقول للطلبات
 MON_SEC   = 30
 MIN_SCORE = 75          # رقم ثقة حقيقي الآن (لا نقاط ثابتة في الحساب)
 RR        = 3           # نسبة المخاطرة
@@ -134,7 +158,7 @@ LIQ_SWEEP_WINDOW = 20    # إصلاح #7: كان 5، الآن يطابق ناف�
 BRAIN_MIN_TRADES = 20    # يطابق brain.MIN_TRADES_TO_LEARN — كان مكتوباً كرقم
                           # ثابت (10) في 3 أماكن مختلفة بلا ترابط، ما يخاطر
                           # بتباعدهما لاحقاً عند تعديل أحد الملفين فقط.
-SCAN_WORKERS = 8          # عدد الطلبات المتوازية أثناء الفحص (إصلاح تأخر الإرسال)
+SCAN_WORKERS = 6          # عدد الطلبات المتوازية أثناء الفحص (خُفّض قليلاً مع تعدد المزوّدين)
 MAX_ENTRY_DRIFT = 0.5     # إصلاح بنيوي: لو السعر الحالي تجاوز نقطة الدخول
                           # المحسوبة بأكثر من 50% من مسافة الوقف، تُرفض
                           # الإشارة لأن الفرصة الفعلية فاتت وقت اكتشافها.
@@ -204,7 +228,7 @@ ST={
     "last_scan":"--:--","scanning":False,"auto_on":False,
     "cooldowns":{},"next_in":0,"scan_n":0,
     "learned":{},"db_stats":{"total":0,"wins":0,"losses":0,"wr":0},
-    "backtest":{},"public_url":""
+    "backtest":{},"public_url":"","data_source":"—"
 }
 
 # ═══════════════════════════════════════════
@@ -339,6 +363,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
 <body>
 <header>
   <h1><span class="ldot"></span> CryptoBot Pro</h1>
+  <span class="hb" id="src-badge" style="margin-left:6px">مصدر: —</span>
   <span class="hb" id="hb">⏹ متوقف</span>
 </header>
 <div class="wrap">
@@ -365,7 +390,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     </div>
   </div>
   <div class="box" id="cvd-box" style="display:none">
-    <h3>📊 أفضل 30 عملات (CVD + COR عالي)</h3>
+    <h3>📊 أفضل 10 عملات (CVD + COR عالي)</h3>
     <div class="tags" id="cvd-list"></div>
   </div>
   <div class="box" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b" id="learn-box" style="display:none">
@@ -377,7 +402,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     <div class="bt-grid" id="bt-grid"></div>
   </div>
   <div class="box">
-    <h3>🔥 أعلى  30 عملة سيولة</h3>
+    <h3>🔥 أعلى 10 عملات سيولة (24 ساعة)</h3>
     <div class="tags" id="sym-list"><span style="color:#94a3b8;font-size:.75rem">في انتظار الفحص...</span></div>
   </div>
   <div class="st">📊 أفضل صفقتين</div>
@@ -416,6 +441,8 @@ socket.on('trades_data',t=>{allT=t;});
 socket.on('connect',()=>socket.emit('req_state'));
 
 function updateUI(d){
+  const srcMap={okx:'🟢 OKX',binance:'🟡 Binance','—':'⏳ --'};
+  document.getElementById('src-badge').textContent='مصدر: '+(srcMap[d.data_source]||d.data_source);
   const hb=document.getElementById('hb');
   if(d.scanning){hb.textContent='⏳ جاري الفحص...';hb.style.background='rgba(251,191,36,.3)';}
   else if(d.auto_on){hb.textContent='🟢 فحص آلي';hb.style.background='rgba(34,197,94,.25)';}
@@ -619,80 +646,115 @@ setInterval(()=>{fetch('/ping').catch(()=>{});},240000);
 """
 
 # ═══════════════════════════════════════════
-#  Kraken API (إصلاح #17: بديل Binance بسبب حظر 451 الجغرافي)
+#  طبقة البيانات متعددة المزوّدين (إصلاح #20)
+#  OKX (مباشر + بروكسيات) → عند الفشل الكامل: Binance (مباشر + بروكسيات)
+#  الفشل الكامل لكل المسارين لا يحدث فعلياً إلا لو كل الروابط محظورة معاً.
 # ═══════════════════════════════════════════
 
-def _kraken_interval(tf):
-    """يحوّل رمز الفريم (4h/1h/15m) إلى الدقائق التي تطلبها Kraken فعلياً."""
-    return {"4h":240,"1h":60,"15m":15}.get(tf,60)
+_EXCLUDE_QUOTE = ("USDCUSDT","BUSDUSDT","TUSDUSDT","FDUSDUSDT","DAIUSDT")
 
-def klines(sym,tf,n=200):
-    try:
-        interval=_kraken_interval(tf)
-        r=_HTTP.get(f"{KRAKEN}/OHLC",params={"pair":sym,"interval":interval},timeout=7)
-        data=r.json()
-        if data.get("error"):
-            log.error(f"klines {sym} {tf}: Kraken رجّع خطأ — {data['error']}")
-            return []
-        result=data.get("result",{})
-        key=next((k for k in result if k!="last"),None)
-        if not key: return []
-        rows=result[key][-n:]
-        out=[]
-        for row in rows:
-            t,o,h,l,c,vwap,vol,count=row
-            o_f=float(o); c_f=float(c); v_f=float(vol)
-            # إصلاح #18: Kraken لا توفّر "حجم الشراء المُنفَّذ" منفصلاً عن حجم
-            # البيع داخل الشمعة كما توفره Binance Futures (حقل tb الأصلي).
-            # تقريب واقعي: الشمعة الصاعدة (close>=open) تُحتسب حجمها بالكامل
-            # كـ"شراء"، والهابطة صفر — يبقي دالة calc_cvd_24h تعمل بنفس بنيتها.
-            tb=v_f if c_f>=o_f else 0.0
-            out.append({"o":o_f,"h":float(h),"l":float(l),"c":c_f,"v":v_f,"t":int(float(t))*1000,"tb":tb})
-        return out
-    except Exception as e:
-        log.error(f"klines {sym} {tf}: {e}")
-        return []
+def _okx_inst(sym):
+    """BTCUSDT -> BTC-USDT-SWAP"""
+    return f"{sym[:-4]}-USDT-SWAP" if sym.endswith("USDT") else sym
 
-def price(sym):
-    try:
-        r=_HTTP.get(f"{KRAKEN}/Ticker",params={"pair":sym},timeout=4)
-        data=r.json()
-        if data.get("error"): return None
-        result=data.get("result",{})
-        key=next((k for k in result if k!="last"),None)
-        if not key: return None
-        return float(result[key]["c"][0])   # آخر سعر تنفيذ
-    except: return None
+def _okx_sym(inst):
+    """BTC-USDT-SWAP -> BTCUSDT"""
+    return inst.replace("-USDT-SWAP","USDT")
 
-def top_symbols(n=TOP_N):
-    try:
-        rp=_HTTP.get(f"{KRAKEN}/AssetPairs",timeout=10)
-        pdata=rp.json()
-        if pdata.get("error"):
-            log.error(f"top_symbols: Kraken (AssetPairs) رجّع خطأ — {pdata['error']}")
-            return []
-        # كل أزواج USDT العامة (نستثني عملات مستقرة أخرى مقابل USDT، غير مفيدة كإشارات اتجاه)
-        excl=("USDCUSDT","DAIUSDT","TUSDUSDT","FDUSDUSDT")
-        all_pairs=[k for k in pdata.get("result",{}) if k.endswith("USDT") and k not in excl]
-        vols={}
-        batch=15   # Kraken تحدّ عدد الأزواج بالطلب الواحد؛ نُجزّئها لدفعات آمنة
-        for i in range(0,len(all_pairs),batch):
-            chunk=all_pairs[i:i+batch]
+_OKX_BAR = {"4h":"4H","1h":"1H","15m":"15m"}
+
+def _okx_klines(base,sym,tf,n):
+    r=_HTTP.get(f"{base}/api/v5/market/candles",
+        params={"instId":_okx_inst(sym),"bar":_OKX_BAR.get(tf,"1H"),"limit":min(n,300)},timeout=7)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    j=r.json()
+    if j.get("code") not in (None,"0"): raise RuntimeError(f"OKX error {j.get('code')}: {j.get('msg')}")
+    rows=list(reversed(j.get("data",[])))   # OKX ترجع الأحدث أولاً؛ نعكس للأقدم أولاً
+    out=[]
+    for row in rows:
+        ts,o,h,l,c,vol,volCcy=row[0],row[1],row[2],row[3],row[4],row[5],row[6]
+        o_f=float(o); c_f=float(c); v_f=float(volCcy)
+        # OKX العامة لا توفر حجم الشراء المنفَّذ منفصلاً (مثل Kraken تماماً)؛
+        # نفس التقريب الواقعي: شمعة صاعدة = حجمها بالكامل "شراء"، هابطة = صفر.
+        tb=v_f if c_f>=o_f else 0.0
+        out.append({"o":o_f,"h":float(h),"l":float(l),"c":c_f,"v":v_f,"t":int(ts),"tb":tb})
+    return out
+
+def _okx_price(base,sym):
+    r=_HTTP.get(f"{base}/api/v5/market/ticker",params={"instId":_okx_inst(sym)},timeout=4)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    j=r.json()
+    if j.get("code") not in (None,"0") or not j.get("data"): raise RuntimeError("no data")
+    return float(j["data"][0]["last"])
+
+def _okx_top_symbols(base,n):
+    r=_HTTP.get(f"{base}/api/v5/market/tickers",params={"instType":"SWAP"},timeout=10)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    j=r.json()
+    if j.get("code") not in (None,"0"): raise RuntimeError(f"OKX error {j.get('code')}")
+    d=[x for x in j.get("data",[]) if x["instId"].endswith("-USDT-SWAP")]
+    d=[x for x in d if _okx_sym(x["instId"]) not in _EXCLUDE_QUOTE]
+    d.sort(key=lambda x:float(x.get("volCcy24h",0) or 0),reverse=True)
+    return [_okx_sym(x["instId"]) for x in d[:n]]
+
+def _bin_klines(base,sym,tf,n):
+    r=_HTTP.get(f"{base}/fapi/v1/klines",params={"symbol":sym,"interval":tf,"limit":n},timeout=7)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    return [{"o":float(k[1]),"h":float(k[2]),"l":float(k[3]),
+             "c":float(k[4]),"v":float(k[5]),"t":k[0],"tb":float(k[9])} for k in r.json()]
+
+def _bin_price(base,sym):
+    r=_HTTP.get(f"{base}/fapi/v1/ticker/price",params={"symbol":sym},timeout=4)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    return float(r.json()['price'])
+
+def _bin_top_symbols(base,n):
+    r=_HTTP.get(f"{base}/fapi/v1/ticker/24hr",timeout=10)
+    if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+    d=[x for x in r.json() if x['symbol'].endswith('USDT') and x['symbol'] not in _EXCLUDE_QUOTE]
+    d.sort(key=lambda x:float(x.get('quoteVolume',0)),reverse=True)
+    return [x['symbol'] for x in d[:n]]
+
+_IMPL = {
+    "okx":     {"klines":_okx_klines, "price":_okx_price, "top_symbols":_okx_top_symbols},
+    "binance": {"klines":_bin_klines, "price":_bin_price, "top_symbols":_bin_top_symbols},
+}
+
+def _call(op,*args):
+    """يحاول المسار المحفوظ (الأسرع) أولاً، وعند فشله يبحث من جديد بدءاً
+    بـ OKX ثم Binance، عبر كل قاعدة (مباشر + بروكسيات) لكل مزوّد بالترتيب.
+    أول قاعدة تُرجع بيانات صالحة تُحفظ كمسار نشط للطلبات القادمة."""
+    with _ACTIVE_LOCK:
+        active=dict(_ACTIVE)
+    if active["provider"]:
+        try:
+            res=_IMPL[active["provider"]][op](active["base"],*args)
+            if res: return res
+        except Exception: pass   # المسار المحفوظ فشل هالمرة — نعيد البحث الكامل بالأسفل
+
+    last_err=None
+    for prov in PROVIDERS:
+        for base in prov["bases"]:
             try:
-                rt=_HTTP.get(f"{KRAKEN}/Ticker",params={"pair":",".join(chunk)},timeout=10)
-                td=rt.json()
-                if td.get("error"): continue
-                for k,info in td.get("result",{}).items():
-                    try:
-                        vol24=float(info["v"][1]); last=float(info["c"][0])
-                        vols[k]=vol24*last   # تقريب لحجم التداول بالدولار (شبيه quoteVolume)
-                    except: continue
-            except Exception: continue
-        ranked=sorted(vols.items(),key=lambda x:x[1],reverse=True)
-        return [k for k,_ in ranked[:n]]
-    except Exception as e:
-        log.error(f"top_symbols: فشل الاتصال بـ Kraken — {e}")
-        return []
+                res=_IMPL[prov["name"]][op](base,*args)
+                if res:
+                    with _ACTIVE_LOCK:
+                        _ACTIVE["provider"]=prov["name"]; _ACTIVE["base"]=base
+                    return res
+            except Exception as e:
+                last_err=e
+                continue
+    log.error(f"{op}: فشلت كل مصادر البيانات (OKX + Binance وكل البروكسيات) — آخر خطأ: {last_err}")
+    return [] if op!="price" else None
+
+def klines(sym,tf,n=200):      return _call("klines",sym,tf,n)
+def price(sym):                return _call("price",sym)
+def top_symbols(n=TOP_N):      return _call("top_symbols",n)
+
+def current_source():
+    """اسم المصدر النشط حالياً (للعرض في الواجهة/اللوق)."""
+    with _ACTIVE_LOCK:
+        return _ACTIVE["provider"] or "—"
 
 # ═══════════════════════════════════════════
 #  مؤشرات تقنية
@@ -908,15 +970,20 @@ def find_fvg(c,direction,lookback=30):
 def find_liq_sweep(c,direction,lookback=40):
     """يُرجع (bool, level, sweep_idx). النافذة الزمنية لفحص السحب الفعلي
     أصبحت LIQ_SWEEP_WINDOW (20 شمعة) بدل 5 فقط، لتطابق نافذة OB/FVG (30).
-    إصلاح جديد: تُرجع الآن أيضاً sweep_idx (الفهرس المطلق للشمعة التي
-    حدث فيها آخر/أحدث سحب سيولة) — مطلوب لضمان أن حساب الحركة الاندفاعية
-    لفيبوناتشي لاحقاً يبدأ فعلياً من لحظة السحب، لا من أي نقطة عشوائية
-    قد تسبقها زمنياً (كانت هذه هي المشكلة الجذرية في ندرة تطابق الفيبو)."""
+    تُرجع أيضاً sweep_idx (الفهرس المطلق للشمعة التي حدث فيها آخر سحب
+    سيولة) — يُستخدم لاحقاً لضبط بداية الحركة الاندفاعية لفيبوناتشي.
+
+    إصلاح #20 (سيولة حقيقية): كانت الدالة تختار "أقرب مستوى سعرياً"
+    للسعر الحالي من بين كل القمم/القيعان المكتشفة — وهذا قد يكون قمة أو
+    قاع قديم نسبياً وليس فعلياً "القمة/القاع السابق" بالمعنى الهيكلي.
+    الآن تُلزَم الدالة باستخدام آخر قمة سابقة فعلية (لبيع) أو آخر قاع
+    سابق فعلي (لشراء) بالترتيب الزمني — أي نفس "القمة السابقة" أو "القاع
+    السابق" الذي يتحدث عنه أي متداول عند وصفه لسحب السيولة الحقيقي،
+    وليس أي قمة/قاع بالصدفة قريب من السعر الحالي."""
     if len(c)<lookback: return False,None,None
     recent=c[-lookback:]
     start_idx=len(c)-(LIQ_SWEEP_WINDOW+1)
     prevN_indexed=list(enumerate(c[start_idx:-1],start=start_idx))
-    cur=c[-1]['c']
     sH=[]; sL=[]
     for i in range(2,len(recent)-2):
         cv=recent[i]
@@ -925,8 +992,8 @@ def find_liq_sweep(c,direction,lookback=40):
         if cv['l']<=recent[i-1]['l'] and cv['l']<=recent[i-2]['l'] and \
            cv['l']<=recent[i+1]['l'] and cv['l']<=recent[i+2]['l']: sL.append(cv['l'])
     if not sH or not sL: return False,None,None
-    pA=min(sH,key=lambda x:abs(x-cur))          # أقرب مقاومة
-    pB=min(sL,key=lambda x:abs(x-cur))          # أقرب دعم (إصلاح #4)
+    pA=sH[-1]   # آخر قمة سابقة فعلية بالترتيب الزمني (وليس الأقرب سعرياً)
+    pB=sL[-1]   # آخر قاع سابق فعلي بالترتيب الزمني (إصلاح #20)
     if direction=="BUY":
         hits=[(idx,p) for idx,p in prevN_indexed if p['l']<pB and p['c']>pB]
         if not hits: return False,None,None
@@ -1488,7 +1555,8 @@ def run_scan():
     elog("🔍 بدء الفحص...","info")
     try:
         syms=top_symbols(TOP_N); ST['top_symbols']=syms
-        btc_c=klines(BTC_PAIR,"1h",25)
+        elog(f"🔀 مصدر البيانات النشط: {current_source()} | عدد العملات: {len(syms)}","info")
+        btc_c=klines("BTCUSDT","1h",25)
         elog("📊 تحليل CVD (24س) + COR (متوازي)...","info")
         cvd_top,cvd_raw=get_cvd_top(syms,btc_c)
         ST['cvd_top']=cvd_top
@@ -1590,7 +1658,8 @@ def get_st():
             "last_scan":ST['last_scan'],"scanning":ST['scanning'],
             "auto_on":ST['auto_on'],"next_in":ST['next_in'],"scan_n":ST['scan_n'],
             "learned":ST['learned'],"db_stats":ST['db_stats'],
-            "backtest":ST['backtest'],"public_url":ST['public_url']}
+            "backtest":ST['backtest'],"public_url":ST['public_url'],
+            "data_source":current_source()}
 
 @app.route('/')
 def index(): return render_template_string(HTML)
@@ -1618,13 +1687,15 @@ def on_toggle():
 
 if __name__=='__main__':
     print("╔══════════════════════════════════════════════════╗")
-    print("║   🚀 CryptoBot Pro — تحليل فني متكامل (v5)       ║")
+    print("║   🚀 CryptoBot Pro — تحليل فني متكامل (v6)       ║")
     print("╠══════════════════════════════════════════════════╣")
     print(f"║  🌐 PORT: {os.environ.get('PORT','5000')}                                ║")
     print("║  📊 4H اتجاه فقط → 1H سيولة+FVG+OB → 15M دخول BOS/CISD ║")
     print("║  📈 CVD(24س تقريبي) + COR + Cluster + Kill Zones  ║")
     print("║  🧠 Brain: ~120 صفقة + تعلم حقيقي مؤثر بالقرار    ║")
-    print("║  ✅ حد الثقة 75% حقيقي | R:R 1:3 | مصدر: Kraken   ║")
+    print("║  ✅ حد ثقة 75% | R:R 1:3 | أعلى 10 سيولة | فحص كل 10د ║")
+    print("║  🔀 مصدر: OKX → Binance (تبديل تلقائي عند الحظر) ║")
+    print(f"║  🧩 بروكسيات OKX: {len(OKX_PROXIES)}  |  بروكسيات Binance: {len(BINANCE_PROXIES)}            ║")
     print("╚══════════════════════════════════════════════════╝")
     if not TG_TOKEN or not TG_CHAT:
         log.warning("⚠️ لم يتم ضبط TG_TOKEN / TG_CHAT كمتغيرات بيئة — رسائل تيليجرام لن تُرسل حتى تُضبط في إعدادات Render (Environment).")
