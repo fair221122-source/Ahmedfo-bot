@@ -149,9 +149,9 @@ _ACTIVE_LOCK = threading.Lock()
 
 COOLDOWN  = 15          # دقيقة
 INTERVAL  = 600         # 10 دقائق (كان 5) — لتقليل عدد الطلبات وتفادي أي حدود معدل
-TOP_N     = 10          # أعلى 10 عملات بالسيولة (حجم التداول) آخر 24 ساعة — حد معقول للطلبات
+TOP_N     = 20          # أعلى 20 عملة بالسيولة (حجم التداول) آخر 24 ساعة — رُفع من 10 لزيادة فرص الإشارات
 MON_SEC   = 30
-MIN_SCORE = 75          # رقم ثقة حقيقي الآن (لا نقاط ثابتة في الحساب)
+MIN_SCORE = 70          # رقم ثقة حقيقي (خُفّض من 75 لزيادة تكرار الإشارات)
 RR        = 3           # نسبة المخاطرة
 FIB_ZONE_MIN, FIB_ZONE_MAX = 0.47, 0.82   # المنطقة الذهبية لفيبوناتشي + هامش واقعي
 LIQ_SWEEP_WINDOW = 20    # إصلاح #7: كان 5، الآن يطابق نافذة OB/FVG (30)
@@ -371,7 +371,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
   <div class="pb" id="pw" style="display:none"><div id="ap" style="width:100%"></div></div>
   <div class="ctrl">
     <button class="btn bm" id="bm" onclick="manualScan()">🔍 فحص يدوي</button>
-    <button class="btn ba" id="ba" onclick="toggleAuto()">▶️ فحص آلي (5د)</button>
+    <button class="btn ba" id="ba" onclick="toggleAuto()">▶️ فحص آلي (10د)</button>
   </div>
   <div class="irow">
     <div class="ic"><div class="lb">آخر فحص</div><div class="vl" id="ls">--:--</div></div>
@@ -379,7 +379,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     <div class="ic"><div class="lb">فحوصات</div><div class="vl" id="sc3">0</div></div>
     <div class="ic"><div class="lb">إشارات</div><div class="vl" id="sic">0</div></div>
     <div class="ic"><div class="lb">مفتوحة</div><div class="vl" id="tc">0</div></div>
-    <div class="ic"><div class="lb">حد الثقة</div><div class="vl" style="color:var(--gold)">75%</div></div>
+    <div class="ic"><div class="lb">حد الثقة</div><div class="vl" style="color:var(--gold)">70%</div></div>
   </div>
   <div class="row2">
     <div class="sc2 sw" onclick="showTrades('win')">
@@ -390,7 +390,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     </div>
   </div>
   <div class="box" id="cvd-box" style="display:none">
-    <h3>📊 أفضل 10 عملات (CVD + COR عالي)</h3>
+    <h3>📊 أفضل 20 عملة (CVD + COR عالي)</h3>
     <div class="tags" id="cvd-list"></div>
   </div>
   <div class="box" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b" id="learn-box" style="display:none">
@@ -402,7 +402,7 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     <div class="bt-grid" id="bt-grid"></div>
   </div>
   <div class="box">
-    <h3>🔥 أعلى 10 عملات سيولة (24 ساعة)</h3>
+    <h3>🔥 أعلى 20 عملة سيولة (24 ساعة)</h3>
     <div class="tags" id="sym-list"><span style="color:#94a3b8;font-size:.75rem">في انتظار الفحص...</span></div>
   </div>
   <div class="st">📊 أفضل صفقتين</div>
@@ -451,7 +451,7 @@ function updateUI(d){
   const ba=document.getElementById('ba');
   if(d.auto_on){ba.textContent='⏹ إيقاف الآلي';ba.className='btn ba on';
     document.getElementById('pw').style.display='block';reqWL();}
-  else{ba.textContent='▶️ فحص آلي (5د)';ba.className='btn ba';
+  else{ba.textContent='▶️ فحص آلي (10د)';ba.className='btn ba';
     document.getElementById('pw').style.display='none';relWL();}
   document.getElementById('ls').textContent=d.last_scan||'--:--';
   document.getElementById('sc3').textContent=d.scan_n||0;
@@ -503,13 +503,13 @@ function startCD(sec){
     if(cd<=0){clearInterval(cdI);el.textContent='جاري...';return;}
     cd--;
     el.textContent=`${Math.floor(cd/60)}:${(cd%60).toString().padStart(2,'0')}`;
-    bar.style.width=(cd/300*100)+'%';
+    bar.style.width=(cd/600*100)+'%';
   },1000);
 }
 
 function renderSignals(signals){
   const w=document.getElementById('sigs-wrap');
-  if(!signals.length){w.innerHTML='<div class="empty"><div class="icon">🔍</div><div>لم تُكتشف إشارات (≥75%)</div></div>';return;}
+  if(!signals.length){w.innerHTML='<div class="empty"><div class="icon">🔍</div><div>لم تُكتشف إشارات (≥70%)</div></div>';return;}
   w.innerHTML=signals.slice(0,2).map(s=>{
     const buy=s.direction==='BUY'; const sc=Math.min(100,Math.round(s.score||0));
     return `
@@ -1586,7 +1586,7 @@ def run_scan():
         for r in rejects:
             elog(f"✗ {r}","info")
         cands.sort(key=lambda x:x['score'],reverse=True)
-        # أفضل صفقتين ≥75% (حد ثقة حقيقي، لا حشو)
+        # أفضل صفقتين ≥70% (حد ثقة حقيقي، لا حشو)
         top_cands=[s for s in cands[:4] if s['score']>=MIN_SCORE]  # هامش إضافي قبل فحص الطزاجة
         best=[]
         for sig in top_cands:
@@ -1641,7 +1641,7 @@ def _auto_w():
 def start_auto():
     if ST['auto_on']: return
     ST['auto_on']=True; elog("▶️ الفحص الآلي كل 5 دقائق","ok")
-    send_tg("▶️ *CryptoBot Pro — الفحص الآلي نشط*\n📊 4H(اتجاه)→1H(سيولة+FVG+OB)→15M(دخول بعد BOS/CISD) | CVD(24س)+COR | حد الثقة 75%",raw=True)
+    send_tg("▶️ *CryptoBot Pro — الفحص الآلي نشط*\n📊 4H(اتجاه)→1H(سيولة+FVG+OB)→15M(دخول بعد BOS/CISD) | CVD(24س)+COR | حد الثقة 70%",raw=True)
     threading.Thread(target=_auto_w,daemon=True).start()
 
 def stop_auto():
@@ -1693,7 +1693,7 @@ if __name__=='__main__':
     print("║  📊 4H اتجاه فقط → 1H سيولة+FVG+OB → 15M دخول BOS/CISD ║")
     print("║  📈 CVD(24س تقريبي) + COR + Cluster + Kill Zones  ║")
     print("║  🧠 Brain: ~120 صفقة + تعلم حقيقي مؤثر بالقرار    ║")
-    print("║  ✅ حد ثقة 75% | R:R 1:3 | أعلى 10 سيولة | فحص كل 10د ║")
+    print("║  ✅ حد ثقة 70% | R:R 1:3 | أعلى 20 سيولة | فحص كل 10د ║")
     print("║  🔀 مصدر: OKX → Binance (تبديل تلقائي عند الحظر) ║")
     print(f"║  🧩 بروكسيات OKX: {len(OKX_PROXIES)}  |  بروكسيات Binance: {len(BINANCE_PROXIES)}            ║")
     print("╚══════════════════════════════════════════════════╝")
