@@ -695,7 +695,15 @@ def _okx_top_symbols(base,n):
     if j.get("code") not in (None,"0"): raise RuntimeError(f"OKX error {j.get('code')}")
     d=[x for x in j.get("data",[]) if x["instId"].endswith("-USDT-SWAP")]
     d=[x for x in d if _okx_sym(x["instId"]) not in _EXCLUDE_QUOTE]
-    d.sort(key=lambda x:float(x.get("volCcy24h",0) or 0),reverse=True)
+    # إصلاح جوهري: "volCcy24h" من OKX لعقود SWAP يقيس الحجم بعدد العملة
+    # الأساسية نفسها (كم قطعة FLOKI/SHIB تداولت)، وليس بقيمتها الدولارية.
+    # عملات الميم الرخيصة يتداول منها كميات هائلة رقمياً فتتصدّر الترتيب
+    # ظلماً فوق BTC/ETH رغم أن قيمتها الدولارية الفعلية أقل بكثير. الحل:
+    # نحسب القيمة الدولارية الحقيقية بأنفسنا = السعر الحالي × الكمية.
+    def _usd_vol(x):
+        try: return float(x.get("last",0) or 0)*float(x.get("volCcy24h",0) or 0)
+        except Exception: return 0.0
+    d.sort(key=_usd_vol,reverse=True)
     return [_okx_sym(x["instId"]) for x in d[:n]]
 
 def _bin_klines(base,sym,tf,n):
