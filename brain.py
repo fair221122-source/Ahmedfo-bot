@@ -32,7 +32,8 @@ C) per_symbol: معدل نجاح فعلي لكل رمز، يُحسب في learn(
 5) min_trades للتعلّم = 20.
 """
 
-import json, os, time, gzip, shutil, threading
+import json, os, time, gzip, shutil, threading, base64
+import urllib.request, urllib.error
 from datetime import datetime
 
 BASE     = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +47,101 @@ LEARN_INTERVAL_SEC  = 3600
 _DB_LOCK     = threading.Lock()
 _OPEN_LOCK   = threading.Lock()
 _SHADOW_LOCK = threading.Lock()   # إصلاح (D): قفل مستقل لملف صفقات الظل
+
+# ═══════════════════════════════════════════
+#  إصلاح #29: نسخ احتياطي دائم على GitHub (قرص Render غير دائم!)
+#  Render (الخطة المجانية) يمسح كل ملف كُتب أثناء التشغيل عند أي إعادة
+#  تشغيل/Deploy، ويرجع لآخر نسخة كانت مرفوعة فعلياً على GitHub. بما أن
+#  البوت لا يرفع تعديلاته لـ GitHub تلقائياً، كل إعادة تشغيل كانت تُصفّر
+#  trades_db.json بالكامل — وهذا يُبطل الهدف الكامل من "تشغيل شهر لتجميع
+#  بيانات تعلّم". الحل: البوت نفسه يرفع نسخة محدَّثة من trades_db.json
+#  (أهم ملف — سجل كل الصفقات المغلقة) إلى GitHub مباشرة بعد كل صفقة تُغلق
+#  وبعد كل دورة تعلّم، ويسحب آخر نسخة محفوظة عند كل إقلاع قبل أي شيء آخر.
+#  يعمل فقط إذا ضُبطت GITHUB_TOKEN + GITHUB_REPO كمتغيرات بيئة على Render؛
+#  بدونهما البوت يعمل تماماً كالسابق (بدون نسخ احتياطي) — لا كسر لأي شيء.
+#  open_trades.json/shadow_trades.json تبقى محلية فقط (تُكتب كل 30 ثانية،
+#  رفعها لـ GitHub بنفس التكرار يتجاوز حدود GitHub API بسرعة) — أسوأ خسارة
+#  ممكنة عند إعادة تشغيل هي فقدان تتبع صفقات مفتوحة حالياً لم تُغلق بعد،
+#  وليس فقدان سجل التعلّم التراكمي نفسه.
+# ═══════════════════════════════════════════
+GITHUB_TOKEN  = os.environ.get("GITHUB_TOKEN","")
+GITHUB_REPO   = os.environ.get("GITHUB_REPO","")     # مثال: "fair221122-source/Ahmedfo-bot"
+GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH","main")
+_GH_API = "https://api.github.com"
+_gh_sha_cache = {}
+
+def _gh_enabled():
+    return bool(GITHUB_TOKEN and GITHUB_REPO)
+
+def _gh_request(method, url, payload=None):
+    headers={"Authorization":f"token {GITHUB_TOKEN}",
+             "Accept":"application/vnd.github+json",
+             "User-Agent":"cryptobot-pro-backup"}
+    data=json.dumps(payload).encode() if payload is not None else None
+    req=urllib.request.Request(url,data=data,headers=headers,method=method)
+    try:
+        with urllib.request.urlopen(req,timeout=15) as resp:
+            return resp.getcode(),json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        try: body=json.loads(e.read().decode())
+        except Exception: body={}
+        return e.code,body
+    except Exception as e:
+        return 0,{"error":str(e)}
+
+def gh_pull(path=None, local_path=None):
+    """يسحب أحدث نسخة محفوظة من GitHub ويكتبها محلياً — يُستدعى عند الإقلاع
+    فقط، قبل تحميل أي بيانات محلية. لا يفعل شيئاً لو GITHUB_TOKEN غير مضبوط."""
+    if not _gh_enabled(): return False
+    path=path or "trades_db.json"; local_path=local_path or DB_FILE
+    url=f"{_GH_API}/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    code,data=_gh_request("GET",url)
+    if code==200 and "content" in data:
+        try:
+            content=base64.b64decode(data["content"])
+            with open(local_path,"wb") as f: f.write(content)
+            _gh_sha_cache[path]=data["sha"]
+            print(f"☁️ استُعيدت {path} من GitHub بنجاح")
+            return True
+        except Exception as e:
+            print(f"gh_pull write error {path}: {e}")
+    elif code==404:
+        print(f"☁️ لا توجد نسخة {path} على GitHub بعد (أول تشغيل)")
+    else:
+        print(f"gh_pull failed {path}: {code} {data}")
+    return False
+
+def gh_push(path=None, local_path=None):
+    """يرفع نسخة محدَّثة من الملف المحلي إلى GitHub (إنشاء أو تحديث)."""
+    if not _gh_enabled(): return False
+    path=path or "trades_db.json"; local_path=local_path or DB_FILE
+    if not os.path.exists(local_path): return False
+    try:
+        with open(local_path,"rb") as f: content=f.read()
+        b64=base64.b64encode(content).decode()
+        sha=_gh_sha_cache.get(path)
+        if not sha:
+            code,data=_gh_request("GET",f"{_GH_API}/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}")
+            if code==200: sha=data.get("sha")
+        payload={"message":f"🤖 auto-backup {path} ({datetime.now().strftime('%Y-%m-%d %H:%M')})",
+                 "content":b64,"branch":GITHUB_BRANCH}
+        if sha: payload["sha"]=sha
+        code,data=_gh_request("PUT",f"{_GH_API}/repos/{GITHUB_REPO}/contents/{path}",payload)
+        if code in (200,201):
+            _gh_sha_cache[path]=data["content"]["sha"]
+            return True
+        print(f"gh_push failed {path}: {code} {data}")
+    except Exception as e:
+        print(f"gh_push error {path}: {e}")
+    return False
+
+def restore_from_github():
+    """يُستدعى مرة واحدة عند إقلاع البوت — يسحب trades_db.json (سجل
+    التعلّم الكامل) من GitHub إن وُجد، قبل أي قراءة محلية أخرى."""
+    if not _gh_enabled():
+        print("ℹ️ GITHUB_TOKEN/GITHUB_REPO غير مضبوطين — النسخ الاحتياطي معطّل (البوت يعمل محلياً فقط)")
+        return
+    gh_pull("trades_db.json", DB_FILE)
 
 # ── قاعدة البيانات ─────────────────────────
 
@@ -130,6 +226,7 @@ def save_trade(signal, outcome):
             db["stats"]["wins"]  =sum(1 for t in db["trades"] if t["outcome"]==1)
             db["stats"]["losses"]=sum(1 for t in db["trades"] if t["outcome"]==0)
         _save(db)
+        gh_push("trades_db.json", DB_FILE)   # إصلاح #29: نسخ احتياطي فوري بعد كل صفقة تُغلق
         return rec
 
 def _update_fail(db,rec):
@@ -223,6 +320,7 @@ def learn():
                   key=lambda x:x[1],reverse=True)
         learned["best_session"]=ss[0][0] if ss else ""
         db["learned"]=learned; db["last_learn"]=time.time(); _save(db)
+        gh_push("trades_db.json", DB_FILE)   # إصلاح #29: نسخ احتياطي إضافي كل دورة تعلّم (كل ساعة)
         return learned
 
 def should_learn():
