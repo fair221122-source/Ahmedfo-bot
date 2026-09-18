@@ -368,6 +368,8 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
   <div id="sigs-wrap"><div class="empty"><div class="icon">🕐</div><div>في انتظار أول فحص...</div></div></div>
   <div class="st">👁️ مراقبة الصفقات المفتوحة</div>
   <div id="mon-wrap"><div class="empty"><div class="icon">📭</div><div>لا توجد صفقات مفتوحة</div></div></div>
+  <div class="st">👻 صفقات الظل (تعلّم فقط — بدون تنبيه، تراقَب حتى الإغلاق)</div>
+  <div id="shadow-wrap"><div class="empty"><div class="icon">👻</div><div>لا توجد بصمات تعلّم قيد المراقبة حالياً</div></div></div>
   <div class="logbox" id="logbox"></div>
 </div>
 
@@ -454,6 +456,7 @@ function updateUI(d){
     if(cdI){clearInterval(cdI);cdI=null;}}
   renderSignals(d.signals||[]);
   renderMonitor(d.open_trades||[]);
+  renderShadow(d.shadow_trades||[]);
 }
 
 function startCD(sec){
@@ -542,6 +545,26 @@ function renderMonitor(trades){
         <div class="pi ${t.hit_sl?'sl-hit':''}">🛑 SL<br>${t.sl}</div>
       </div>
       ${tsNote}
+    </div>`;
+  }).join('');
+}
+
+function renderShadow(trades){
+  const w=document.getElementById('shadow-wrap');
+  if(!trades.length){w.innerHTML='<div class="empty"><div class="icon">👻</div><div>لا توجد بصمات تعلّم قيد المراقبة حالياً</div></div>';return;}
+  w.innerHTML=trades.map(t=>{
+    const st=t.status||'open'; const pnl=t.pnl||0;
+    const stL={open:'🔵 مفتوحة',tp:'✅ الهدف',sl:'🔴 استوب'}[st]||st;
+    return `
+    <div class="mc" style="opacity:.72;border-right-color:#94a3b8">
+      <div class="mh"><div class="ms3">👻 ${t.direction==='BUY'?'🟢':'🔴'} ${t.symbol}</div>
+        <div class="ms ${st}">${stL}</div></div>
+      <div class="minfo">
+        <span>دخول: <b>${t.entry}</b></span>
+        <span>حالي: <b>${t.current||'...'}</b></span>
+        <span>P&L: <b style="color:${pnl>=0?'var(--grn)':'var(--red)'}">${pnl}%</b></span>
+        <span>ثقة: <b>${Math.round(t.score||0)}%</b></span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1717,6 +1740,7 @@ def stop_auto():
 def get_st():
     return {"signals":ST['signals'],"open_trades":ST['open_trades'],
             "shadow_count":len(ST.get('shadow_trades',[])),
+            "shadow_trades":ST.get('shadow_trades',[]),
             "top_symbols":ST['top_symbols'],"cvd_top":ST['cvd_top'],
             "last_scan":ST['last_scan'],"scanning":ST['scanning'],
             "auto_on":ST['auto_on'],"next_in":ST['next_in'],"scan_n":ST['scan_n'],
@@ -1766,6 +1790,7 @@ if __name__=='__main__':
     ST['public_url']=os.environ.get("RENDER_EXTERNAL_URL","")
     _load_ids()
     if BRAIN_OK:
+        brain.restore_from_github()   # إصلاح #29: سحب آخر نسخة محفوظة قبل أي قراءة محلية
         ST['learned']=brain.get_learned()
         ST['db_stats']=brain.get_stats()
         ST['backtest']=brain.get_backtest()
