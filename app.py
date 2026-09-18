@@ -40,6 +40,13 @@
     يزال دون لمس اليوم — سيولة معلّقة تُرجّح استمرار الحركة نحوها. يُضاف
     للسكور وللواجهة/رسالة تيليجرام كمعلومة إضافية، وليس شرط دخول.
 
+28) استبعاد عقود Binance "TradFi Perpetual" (ذهب/فضة/أسهم مُرمزة مثل
+    XAUUSDT, XAGUSDT, SKHYNIXUSDT, SPCXUSDT...) من قائمة العملات المرشحة —
+    هذه عقود جديدة تتبع أصولاً تقليدية لا كريبتو، أصبحت تتصدر أعلى العملات
+    حجماً على Binance فعلياً، لكن سلوكها السعري مختلف جذرياً (فجوات عند
+    فتح/إغلاق السوق الأصلي) فيُفسِد جودة إشارات استراتيجية مصمّمة أصلاً
+    لسلوك الكريبتو المستمر. الاستبعاد تلقائي عبر exchangeInfo العام.
+
 27) 🚧 مكان محجوز فقط للتنفيذ الحقيقي المستقبلي (execute_real_trade +
     EXECUTION_MODE + BINANCE_API_KEY/SECRET + RISK_USD/PROFIT_USD): كل
     هذا **معطّل بالكامل افتراضياً** (EXECUTION_MODE=SIGNAL_ONLY) ولا يُغيّر
@@ -663,10 +670,48 @@ def _bin_price(base,sym):
     if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
     return float(r.json()['price'])
 
+# إصلاح #28: استبعاد عقود Binance "TradFi Perpetual" (ذهب/فضة/أسهم مُرمزة
+# مثل XAUUSDT, XAGUSDT, SKHYNIXUSDT, SPCXUSDT...) من كون البيانات المرشحة.
+# هذه عقود حديثة تتبع أصولاً تقليدية (سلع/أسهم) لا كريبتو، وأصبحت من ضمن
+# أعلى العملات حجماً على Binance (بعضها يتصدر القائمة فعلياً)، لكن سلوكها
+# السعري مختلف جذرياً عن الكريبتو (فجوات سعرية عند أوقات فتح/إغلاق السوق
+# الأصلي، مزوّدو سيولة مختلفون) — استراتيجية سحب السيولة/FVG/Order Block
+# مصممة لسلوك الكريبتو المستمر 24/7، فتطبيقها على هذه الأصول يعطي إشارات
+# "صحيحة تقنياً" لكن غير موثوقة عملياً. يُميَّزان عبر exchangeInfo العام
+# (بدون API key) بحقلي contractType (تحوي "TRADIFI") أو underlyingType
+# (EQUITY/KR_EQUITY/HK_EQUITY/PREMARKET/COMMODITY بدل قيمة الكريبتو الافتراضية).
+_TRADFI_EXCLUDE = set()
+_TRADFI_TS = 0
+_TRADFI_TTL = 6*3600
+_NON_CRYPTO_UNDERLYING = {"EQUITY","KR_EQUITY","HK_EQUITY","PREMARKET","COMMODITY"}
+
+def _load_tradfi_exclude():
+    global _TRADFI_EXCLUDE,_TRADFI_TS
+    if _TRADFI_EXCLUDE and (time.time()-_TRADFI_TS)<_TRADFI_TTL:
+        return _TRADFI_EXCLUDE
+    try:
+        r=_HTTP.get(f"{BINANCE_DIRECT}/fapi/v1/exchangeInfo",timeout=10)
+        if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+        excl=set()
+        for s in r.json().get("symbols",[]):
+            sym=s.get("symbol","")
+            ctype=str(s.get("contractType","")).upper()
+            utype=str(s.get("underlyingType","")).upper()
+            if "TRADIFI" in ctype or utype in _NON_CRYPTO_UNDERLYING:
+                excl.add(sym)
+        if excl:
+            _TRADFI_EXCLUDE=excl; _TRADFI_TS=time.time()
+            log.info(f"🚫 استُبعد {len(excl)} عقد TradFi (غير كريبتو) من قائمة الترشيح")
+    except Exception as e:
+        log.warning(f"تعذّر تحميل قائمة استبعاد عقود TradFi من Binance: {e} — سيُستخدم آخر نسخة محفوظة إن وُجدت")
+    return _TRADFI_EXCLUDE
+
 def _bin_top_symbols(base,n):
     r=_HTTP.get(f"{base}/fapi/v1/ticker/24hr",timeout=10)
     if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
-    d=[x for x in r.json() if x['symbol'].endswith('USDT') and x['symbol'] not in _EXCLUDE_QUOTE]
+    tradfi=_load_tradfi_exclude()
+    d=[x for x in r.json() if x['symbol'].endswith('USDT')
+       and x['symbol'] not in _EXCLUDE_QUOTE and x['symbol'] not in tradfi]
     d.sort(key=lambda x:float(x.get('quoteVolume',0)),reverse=True)
     return [x['symbol'] for x in d[:n]]
 
