@@ -11,8 +11,8 @@
 ═══════════════════════════════════════════════════════════
 سجل التعديلات (نسخة v7 — Binance أساسي + تعلّم غير مقيّد + سيولة يومية):
 ═══════════════════════════════════════════════════════════
-23) مصدر البيانات: Binance Public Futures أصبح المصدر **الأساسي** بدل OKX
-    (بطلب صريح). OKX أُبقي كمسار احتياطي تلقائي فقط (نفس نظام التبديل
+23) مصدر البيانات: Binance Public Futures أصبح المصدر **الوحيد والحصري**
+    بدل OKX (بطلب صريح — راجع أيضاً إصلاح #30). كان OKX مُبقىً كمسار احتياطي مؤقتاً (نفس نظام التبديل
     الموجود مسبقاً في _call) لضمان استمرار البوت حتى لو حُظر Binance
     مؤقتاً على IP الخادم — لا تكلفة من إبقائه، والتبديل تلقائي بالكامل.
     كلا المزوّدين "عامّان" (public) ولا يحتاجان أي مفتاح API.
@@ -25,15 +25,12 @@
     عملة لا جدوى من الدخول فيها بمخاطرة $1 — المعيار الحقيقي هو "قابلية
     التنفيذ"، وليس سعر العملة بحد ذاته.
 
-25) تعلّم غير مقيّد (Shadow Trades): كانت الصفقات المُراقَبة والمحفوظة
-    لـ brain.py مقصورة على أفضل صفقتين فقط لكل دورة فحص (لتفادي إغراق
-    تيليجرام برسائل). الآن **كل** إشارة تجتاز الشروط الإلزامية (وليس فقط
-    أفضل 2 ≥ MIN_SCORE) تُضاف كـ"صفقة ظل" (shadow trade): تُراقَب حتى
-    الإغلاق (TP/SL) بنفس آلية المراقبة، وتُحفظ فعلياً في trades_db.json
-    لتغذية التعلّم — لكن **بدون** أي تنبيه تيليجرام أو نافذة منبثقة، فقط
-    سجلّ صامت. هذا يرفع عدد "بصمات" التعلّم بشكل كبير خلال فترة تشغيل
-    طويلة (شهر أو أكثر) دون إزعاج المستخدم، تماماً كما طُلب. عدد صفقات
-    الظل المتزامنة محدود بـ SHADOW_MAX (افتراضياً 80) كصمام أمان فقط.
+25) [أُلغيت بطلب صريح] "صفقات الظل" (تتبّع إشارات إضافية بصمت للتعلّم بدون
+    تنبيه) أُضيفت مؤقتاً ثم أُزيلت بالكامل لاحقاً — البوت الآن يتتبّع
+    ويُخطِر بأفضل صفقتين فقط لكل دورة فحص (≥MIN_SCORE)، ولا يوجد أي تتبّع
+    أو تخزين لأي صفقة غير هذه. كل صفقة تظهر في الواجهة أو تُحفظ في
+    trades_db.json هي إشارة حقيقية اجتازت كل الشروط الإلزامية وأُرسلت
+    فعلياً كتنبيه — لا توجد بيانات "خفية" أو موازية بأي شكل.
 
 26) استهداف السيولة اليومية غير المستهلكة (find_unswept_daily_liquidity):
     عامل تعزيز جديد يتحقق هل قمة/قاع اليوم السابق (حسب اتجاه الصفقة) لا
@@ -52,6 +49,14 @@
     هذا **معطّل بالكامل افتراضياً** (EXECUTION_MODE=SIGNAL_ONLY) ولا يُغيّر
     أي سلوك حالي للبوت إطلاقاً — فقط جاهز ليُفعَّل لاحقاً بإضافة مفاتيح
     API وتغيير EXECUTION_MODE=LIVE، دون أي تعديل إضافي على الكود حينها.
+
+30) تبسيط شامل بطلب صريح: (أ) Binance Public Futures أصبح المصدر
+    **الوحيد** للبيانات — أُزيل OKX تماماً من PROVIDERS (لا مصدر احتياطي
+    إطلاقاً، كل إشارة وكل بيانات مبنية حصراً على Binance). (ب) نظام
+    "صفقات الظل" أُلغي بالكامل — لا يوجد أي تتبّع أو تخزين لأي صفقة غير
+    أفضل صفقتين فعليتين ≥MIN_SCORE لكل دورة فحص، وكل ما يظهر بالواجهة أو
+    يُحفظ في trades_db.json هو إشارة حقيقية أُرسلت فعلياً كتنبيه — لا
+    توجد بيانات موازية أو مخفية بأي شكل.
 
 ═══════════════════════════════════════════════════════════
 (سجل الإصلاحات السابقة v1-v6 محفوظ كما هو دون حذف — راجع تاريخ المشروع)
@@ -84,10 +89,13 @@ BINANCE_DIRECT  = "https://fapi.binance.com"
 OKX_PROXIES     = [u.strip() for u in os.environ.get("OKX_PROXY_URLS","").split(",") if u.strip()]
 BINANCE_PROXIES = [u.strip() for u in os.environ.get("BINANCE_PROXY_URLS","").split(",") if u.strip()]
 
-# ترتيب المزوّدين: Binance أولاً (المصدر الأساسي الجديد)، OKX احتياطي تلقائي.
+# إصلاح #30 (بطلب صريح): Binance Public Futures هو المصدر الوحيد والحصري
+# الآن — لا يوجد أي مصدر بيانات احتياطي (OKX أُزيل بالكامل من مسار
+# البيانات). لو Binance تعطّل أو حُظر مؤقتاً، الفحص يفشل بوضوح ويُسجَّل في
+# اللوق، ولا يتحول لمصدر آخر بصمت — لضمان أن كل إشارة وكل تنفيذ حقيقي
+# مستقبلاً مبني حصراً على بيانات Binance فقط، دون أي التباس بمصدر آخر.
 PROVIDERS = [
     {"name":"binance", "bases":[BINANCE_DIRECT]+BINANCE_PROXIES},
-    {"name":"okx",     "bases":[OKX_DIRECT]+OKX_PROXIES},
 ]
 # آخر مسار (مزوّد+قاعدة) نجح فعلياً — يُستخدم كمسار سريع بدل إعادة تجربة
 # كل شيء من الصفر في كل طلب؛ لو فشل هذا المسار المحفوظ، تُعاد المحاولة
@@ -113,7 +121,6 @@ MAX_ENTRY_DRIFT = 0.5
 # القابلة للتنفيذ فعلياً بهذه المخاطرة. لا تُنفَّذ أي صفقة حقيقية بها بعد.
 RISK_USD    = float(os.environ.get("RISK_USD","1.0"))                 # أقصى خسارة مقبولة/صفقة
 PROFIT_USD  = float(os.environ.get("PROFIT_USD", str(RISK_USD*RR)))   # الهدف المقابل (1:3 افتراضياً)
-SHADOW_MAX  = int(os.environ.get("SHADOW_MAX","80"))                  # أقصى صفقات "ظل" متزامنة (تعلّم فقط)
 
 # ─── إصلاح #27: 🚧 مكان محجوز فقط للتنفيذ الحقيقي المستقبلي ───────────
 # لا تُقرأ هذه المفاتيح ولا تُستخدم لأي تنفيذ فعلي طالما EXECUTION_MODE
@@ -183,7 +190,7 @@ def _poll_tg():
 
 # الحالة
 ST={
-    "signals":[],"open_trades":[],"shadow_trades":[],"top_symbols":[],"cvd_top":[],
+    "signals":[],"open_trades":[],"top_symbols":[],"cvd_top":[],
     "last_scan":"--:--","scanning":False,"auto_on":False,
     "cooldowns":{},"next_in":0,"scan_n":0,
     "learned":{},"db_stats":{"total":0,"wins":0,"losses":0,"wr":0},
@@ -338,7 +345,6 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
     <div class="ic"><div class="lb">فحوصات</div><div class="vl" id="sc3">0</div></div>
     <div class="ic"><div class="lb">إشارات</div><div class="vl" id="sic">0</div></div>
     <div class="ic"><div class="lb">مفتوحة</div><div class="vl" id="tc">0</div></div>
-    <div class="ic"><div class="lb">👻 بصمات تعلّم</div><div class="vl" id="shc">0</div></div>
   </div>
   <div class="row2">
     <div class="sc2 sw" onclick="showTrades('win')">
@@ -368,8 +374,6 @@ header h1{font-size:1rem;display:flex;align-items:center;gap:7px}
   <div id="sigs-wrap"><div class="empty"><div class="icon">🕐</div><div>في انتظار أول فحص...</div></div></div>
   <div class="st">👁️ مراقبة الصفقات المفتوحة</div>
   <div id="mon-wrap"><div class="empty"><div class="icon">📭</div><div>لا توجد صفقات مفتوحة</div></div></div>
-  <div class="st">👻 صفقات الظل (تعلّم فقط — بدون تنبيه، تراقَب حتى الإغلاق)</div>
-  <div id="shadow-wrap"><div class="empty"><div class="icon">👻</div><div>لا توجد بصمات تعلّم قيد المراقبة حالياً</div></div></div>
   <div class="logbox" id="logbox"></div>
 </div>
 
@@ -402,7 +406,7 @@ socket.on('trades_data',t=>{allT=t;});
 socket.on('connect',()=>socket.emit('req_state'));
 
 function updateUI(d){
-  const srcMap={okx:'🟡 OKX',binance:'🟢 Binance','—':'⏳ --'};
+  const srcMap={binance:'🟢 Binance','—':'⏳ --'};
   document.getElementById('src-badge').textContent='مصدر: '+(srcMap[d.data_source]||d.data_source);
   const hb=document.getElementById('hb');
   if(d.scanning){hb.textContent='⏳ جاري الفحص...';hb.style.background='rgba(251,191,36,.3)';}
@@ -418,7 +422,6 @@ function updateUI(d){
   document.getElementById('sc3').textContent=d.scan_n||0;
   document.getElementById('sic').textContent=(d.signals||[]).length;
   document.getElementById('tc').textContent=(d.open_trades||[]).length;
-  document.getElementById('shc').textContent=d.shadow_count||0;
   const st=d.db_stats||{};
   document.getElementById('wn').textContent=st.wins||0;
   document.getElementById('ln').textContent=st.losses||0;
@@ -456,7 +459,6 @@ function updateUI(d){
     if(cdI){clearInterval(cdI);cdI=null;}}
   renderSignals(d.signals||[]);
   renderMonitor(d.open_trades||[]);
-  renderShadow(d.shadow_trades||[]);
 }
 
 function startCD(sec){
@@ -549,25 +551,6 @@ function renderMonitor(trades){
   }).join('');
 }
 
-function renderShadow(trades){
-  const w=document.getElementById('shadow-wrap');
-  if(!trades.length){w.innerHTML='<div class="empty"><div class="icon">👻</div><div>لا توجد بصمات تعلّم قيد المراقبة حالياً</div></div>';return;}
-  w.innerHTML=trades.map(t=>{
-    const st=t.status||'open'; const pnl=t.pnl||0;
-    const stL={open:'🔵 مفتوحة',tp:'✅ الهدف',sl:'🔴 استوب'}[st]||st;
-    return `
-    <div class="mc" style="opacity:.72;border-right-color:#94a3b8">
-      <div class="mh"><div class="ms3">👻 ${t.direction==='BUY'?'🟢':'🔴'} ${t.symbol}</div>
-        <div class="ms ${st}">${stL}</div></div>
-      <div class="minfo">
-        <span>دخول: <b>${t.entry}</b></span>
-        <span>حالي: <b>${t.current||'...'}</b></span>
-        <span>P&L: <b style="color:${pnl>=0?'var(--grn)':'var(--red)'}">${pnl}%</b></span>
-        <span>ثقة: <b>${Math.round(t.score||0)}%</b></span>
-      </div>
-    </div>`;
-  }).join('');
-}
 
 function showTrades(type){
   const isW=type==='win';
@@ -745,7 +728,7 @@ _IMPL = {
 
 def _call(op,*args):
     """يحاول المسار المحفوظ (الأسرع) أولاً، وعند فشله يبحث من جديد بدءاً
-    بـ Binance ثم OKX، عبر كل قاعدة (مباشر + بروكسيات) لكل مزوّد بالترتيب.
+    بـ Binance فقط (المزوّد الوحيد)، عبر كل قاعدة (مباشر + بروكسيات) بالترتيب.
     أول قاعدة تُرجع بيانات صالحة تُحفظ كمسار نشط للطلبات القادمة."""
     with _ACTIVE_LOCK:
         active=dict(_ACTIVE)
@@ -769,7 +752,7 @@ def _call(op,*args):
                 continue
     sym_ctx=f" | الرمز: {args[0]}" if args else ""
     lvl = log.warning if "400" in str(last_err) else log.error
-    lvl(f"{op}: فشلت كل مصادر البيانات (Binance + OKX وكل البروكسيات){sym_ctx} — آخر خطأ: {last_err}")
+    lvl(f"{op}: فشلت كل مسارات Binance (مباشر + كل البروكسيات){sym_ctx} — آخر خطأ: {last_err}")
     return [] if op!="price" else None
 
 def klines(sym,tf,n=200):      return _call("klines",sym,tf,n)
@@ -1452,7 +1435,7 @@ def execute_real_trade(signal,qty,leverage=None):
     raise NotImplementedError("التنفيذ الحقيقي لم يُبنَ بعد — قادم في مرحلة ربط API")
 
 # ═══════════════════════════════════════════
-#  مراقبة الصفقات (real + shadow)
+#  مراقبة الصفقات المفتوحة الحقيقية
 # ═══════════════════════════════════════════
 
 def _notify(trade,event,msg,save=True,alert=True):
@@ -1514,9 +1497,6 @@ def mon_loop():
             if ST['open_trades']:
                 ST['open_trades']=_monitor_list(ST['open_trades'],alert=True)
                 if BRAIN_OK: brain.save_open(ST['open_trades'])
-            if ST.get('shadow_trades'):
-                ST['shadow_trades']=_monitor_list(ST['shadow_trades'],alert=False)
-                if BRAIN_OK: brain.save_shadow(ST['shadow_trades'])
             sio.emit('state_update',get_st())
         except Exception as e:
             log.error(f"mon_loop: {e}")
@@ -1674,7 +1654,7 @@ def run_scan():
             elog(f"📤 {sig['symbol']} أُرسل ✅","ok")
             trade=dict(sig)
             trade.update({'status':'open','hit_tp':False,'hit_sl':False,
-                          'hit_tp1':False,'pnl':0.0,'is_shadow':False})
+                          'hit_tp1':False,'pnl':0.0})
             if sig['symbol'] not in [t['symbol'] for t in ST['open_trades']]:
                 ST['open_trades'].append(trade)
             # 🚧 مكان محجوز فقط — لا يُنفَّذ شيء طالما EXECUTION_MODE=SIGNAL_ONLY
@@ -1682,31 +1662,14 @@ def run_scan():
                 try: execute_real_trade(sig,sig.get('qty'))
                 except Exception as e: elog(f"⚠️ execute_real_trade: {e}","warn")
 
-        # ─── إصلاح #25: تسجيل بصمات إضافية للتعلّم (بدون حد أعلى-2 وبلا تنبيه) ───
-        existing_syms={t['symbol'] for t in ST['open_trades']}|{t['symbol'] for t in ST['shadow_trades']}
-        added_shadow=0
-        if len(ST['shadow_trades'])<SHADOW_MAX:
-            for sig in cands:
-                if len(ST['shadow_trades'])>=SHADOW_MAX: break
-                if sig['symbol'] in existing_syms: continue
-                shadow=dict(sig)
-                shadow.update({'status':'open','hit_tp':False,'hit_sl':False,
-                               'hit_tp1':False,'pnl':0.0,'is_shadow':True})
-                ST['shadow_trades'].append(shadow)
-                existing_syms.add(sig['symbol'])
-                added_shadow+=1
-        if added_shadow:
-            elog(f"👻 أُضيفت {added_shadow} بصمة تعلّم (بدون تنبيه) — إجمالي قيد المراقبة: {len(ST['shadow_trades'])}","info")
-
         if BRAIN_OK:
             brain.save_open(ST['open_trades'])
-            brain.save_shadow(ST['shadow_trades'])
             ST['db_stats']=brain.get_stats()
             ST['backtest']=brain.get_backtest()
             sio.emit('trades_data',brain.get_all_trades())
         ST['signals']=best
         ST['last_scan']=datetime.now().strftime("%H:%M:%S")
-        elog(f"🏁 انتهى | {len(best)} إشارة مُنبَّهة | {added_shadow} بصمة تعلّم | {len(cands)} مرشح إجمالاً","ok")
+        elog(f"🏁 انتهى | {len(best)} إشارة | {len(cands)} مرشح إجمالاً","ok")
     except Exception as e:
         elog(f"❌ خطأ: {e}","err"); log.error(f"scan: {e}")
     finally:
@@ -1726,7 +1689,7 @@ def _auto_w():
 def start_auto():
     if ST['auto_on']: return
     ST['auto_on']=True; elog("▶️ الفحص الآلي كل 10 دقائق","ok")
-    send_tg("▶️ *CryptoBot Pro — الفحص الآلي نشط*\n📊 4H(اتجاه)→1H(سيولة+FVG+OB)→15M(دخول بعد BOS/CISD) | CVD(24س)+COR | حد الثقة 70%\n🔀 مصدر: Binance (أساسي) → OKX (احتياطي)",raw=True)
+    send_tg("▶️ *CryptoBot Pro — الفحص الآلي نشط*\n📊 4H(اتجاه)→1H(سيولة+FVG+OB)→15M(دخول بعد BOS/CISD) | CVD(24س)+COR | حد الثقة 70%\n🔀 مصدر: Binance Futures (حصري)",raw=True)
     threading.Thread(target=_auto_w,daemon=True).start()
 
 def stop_auto():
@@ -1739,8 +1702,6 @@ def stop_auto():
 
 def get_st():
     return {"signals":ST['signals'],"open_trades":ST['open_trades'],
-            "shadow_count":len(ST.get('shadow_trades',[])),
-            "shadow_trades":ST.get('shadow_trades',[]),
             "top_symbols":ST['top_symbols'],"cvd_top":ST['cvd_top'],
             "last_scan":ST['last_scan'],"scanning":ST['scanning'],
             "auto_on":ST['auto_on'],"next_in":ST['next_in'],"scan_n":ST['scan_n'],
@@ -1779,9 +1740,9 @@ if __name__=='__main__':
     print(f"║  🌐 PORT: {os.environ.get('PORT','5000')}                                ║")
     print("║  📊 4H اتجاه فقط → 1H سيولة+FVG+OB → 15M دخول BOS/CISD ║")
     print("║  📈 CVD(24س) + COR + Cluster + Kill Zones + سيولة يومية ║")
-    print("║  🧠 Brain: تعلّم غير مقيّد عبر صفقات الظل (Shadow) ║")
+    print("║  🧠 Brain: تعلّم من الصفقات الحقيقية المُرسَلة فقط ║")
     print(f"║  ✅ حد ثقة {MIN_SCORE}% | R:R 1:{RR} | مخاطرة افتراضية ${RISK_USD}/صفقة  ║")
-    print("║  🔀 مصدر: Binance (أساسي) → OKX (احتياطي تلقائي) ║")
+    print("║  🔀 مصدر: Binance Futures فقط (حصري، بدون احتياطي) ║")
     print(f"║  🚧 EXECUTION_MODE={EXECUTION_MODE} (SIGNAL_ONLY = لا تنفيذ حقيقي) ║")
     print(f"║  🧩 بروكسيات Binance: {len(BINANCE_PROXIES)}  |  بروكسيات OKX: {len(OKX_PROXIES)}            ║")
     print("╚══════════════════════════════════════════════════╝")
@@ -1796,8 +1757,7 @@ if __name__=='__main__':
         ST['backtest']=brain.get_backtest()
         recovered=brain.load_open()
         if recovered: ST['open_trades']=recovered; log.info(f"✅ استُعيدت {len(recovered)} صفقة")
-        recovered_shadow=brain.load_shadow()
-        if recovered_shadow: ST['shadow_trades']=recovered_shadow; log.info(f"👻 استُعيدت {len(recovered_shadow)} بصمة تعلّم")
+
     threading.Thread(target=mon_loop,   daemon=True).start()
     threading.Thread(target=learn_loop, daemon=True).start()
     threading.Thread(target=ka_loop,    daemon=True).start()
