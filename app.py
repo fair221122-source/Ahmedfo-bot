@@ -106,7 +106,7 @@ _ACTIVE_LOCK = threading.Lock()
 
 COOLDOWN  = 15          # دقيقة
 INTERVAL  = 600         # 10 دقائق — لتقليل عدد الطلبات وتفادي أي حدود معدل
-TOP_N     = 20          # أعلى 20 عملة بالسيولة (حجم التداول) آخر 24 ساعة
+TOP_N     = 10          # إصلاح #31 (بطلب صريح + اقتصاد موارد): أعلى 10 عملات بالسيولة فقط (كانت 20)
 MON_SEC   = 30
 MIN_SCORE = 70          # رقم ثقة حقيقي — يُستخدم فقط لتحديد ما يُرسَل كتنبيه فعلي
 RR        = 3           # نسبة المخاطرة
@@ -1218,6 +1218,13 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         if debug is not None: debug.append(f"{sym}: {reason}")
         return None
     try:
+        # ─── إصلاح #31 (بطلب صريح): التداول فقط بجلستي لندن ونيويورك ───
+        # يُفحص هذا أولاً، قبل أي جلب بيانات، لتوفير طلبات Binance فعلياً
+        # خارج هذه الساعات (اقتصاد موارد حقيقي، لا رفض بعد جلب كل شيء).
+        sess=get_session()
+        if sess["session"] not in ("London","NY"):
+            return reject(f"خارج الجلسات الرئيسية (الجلسة الحالية: {sess['session']}) — التداول مقصور على لندن/نيويورك")
+
         c4h =klines(sym,"4h",100)
         c1h =klines(sym,"1h",150)
         c15m=klines(sym,"15m",80)
@@ -1225,12 +1232,32 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
             return reject("بيانات تاريخية غير كافية")
 
         cur=c15m[-1]['c']
-        sess=get_session()
 
-        # ─── 4H: الاتجاه العام فقط ─────────────────────────────
+        # ─── 4H: الاتجاه العام ─────────────────────────────
+        # إصلاح #31: الاتجاه الافتراضي يتبع 4H كالسابق، لكن يُسمح بانعكاس
+        # عكس الترند فقط عند CHoCH حقيقي وحاسم على 1H بالاتجاه المعاكس —
+        # وهذا الانعكاس نفسه يمرّ بعدها بنفس الشروط الإلزامية الصارمة
+        # (سحب سيولة + FVG معاد اختباره + BOS) بلا أي استثناء أو تساهل.
         tr4h,trend_d=trend4h(c4h)
-        if tr4h=="SIDEWAYS": return reject("لا يوجد اتجاه واضح على 4H")
-        direction="BUY" if tr4h=="UP" else "SELL"
+        trend_direction = "BUY" if tr4h=="UP" else ("SELL" if tr4h=="DOWN" else None)
+        choch_buy,  choch_buy_lvl  = find_choch(c1h,"BUY",50)
+        choch_sell, choch_sell_lvl = find_choch(c1h,"SELL",50)
+
+        counter_trend=False
+        if trend_direction is None:
+            # ترند جانبي على 4H — لا تداول إلا بانعكاس هيكلي حاسم واحد الاتجاه على 1H
+            if choch_buy and not choch_sell:   direction="BUY";  counter_trend=True
+            elif choch_sell and not choch_buy: direction="SELL"; counter_trend=True
+            else: return reject("لا يوجد اتجاه واضح على 4H ولا CHoCH حاسم على 1H لتحديد الاتجاه")
+        else:
+            direction=trend_direction
+            opposite_choch = choch_sell if direction=="BUY" else choch_buy
+            if opposite_choch:
+                direction = "SELL" if direction=="BUY" else "BUY"
+                counter_trend=True   # عكس الترند العام — يتطلب لاحقاً تأكيد سيولة يومية غير مستهلكة إضافي
+
+        choch_ok    = choch_buy  if direction=="BUY" else choch_sell
+        choch_level = choch_buy_lvl if direction=="BUY" else choch_sell_lvl
 
         # ─── 1H: سحب سيولة (إلزامي) + رسم FVG/OB ────────────────
         liq_sweep,sweep_level,sweep_idx=find_liq_sweep(c1h,direction,40)
@@ -1248,13 +1275,27 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         entry_zone_1h=ob_1h or fvg_1h
         fib_ok,fib_precision=find_fib_golden_zone(c1h,direction,sweep_level,sweep_idx,entry_zone_1h)
 
-        choch_ok,choch_level=find_choch(c1h,direction,50)
-
         sr_flip,sr_level=find_sr_flip(c1h,direction,50)
         wick_ok=find_wick(c1h,direction,6)
         vol_break=find_vol_breakout(c1h,direction,20)
 
-        # ─── 15M: تأكيد الدخول بعد الكسر (BOS) أو CISD — أحدهما إلزامي ───
+        # ─── إصلاح #31: BOS أو CHoCH إلزامي على 1H و/أو 4H (لا تداول على
+        # مجرد لمس منطقة اهتمام/OB بدون كسر هيكلي حقيقي يؤكدها — يستبعد
+        # هذا حركات تصفية المراكز/الشعيرات العابرة التي تلمس المنطقة بدون
+        # كسر فعلي، خصوصاً على الفريمات المشهورة 1H و4H) ───────────────
+        bos_1h_ok,bos_1h_level=find_bos(c1h,direction,20)
+        bos_4h_ok,bos_4h_level=find_bos(c4h,direction,15)
+        if not (choch_ok or bos_1h_ok or bos_4h_ok):
+            return reject("لا يوجد BOS ولا CHoCH حقيقي على 1H/4H — رفض تفادياً لمنطقة تصفية مراكز محتملة")
+
+        # إصلاح #31: عكس الترند العام يتطلب تأكيداً إضافياً — سيولة يومية
+        # غير مستهلكة واضحة بنفس اتجاه الانعكاس (وليست مجرد نقطة تعزيز
+        # اختيارية كباقي الحالات) — تماشياً مع الطلب الصريح.
+        daily_liq_precheck=find_unswept_daily_liquidity(sym,direction,cur)
+        if counter_trend and not (daily_liq_precheck and not daily_liq_precheck["swept"]):
+            return reject("عكس اتجاه الترند العام يتطلب سيولة يومية غير مستهلكة واضحة بنفس الاتجاه — غير متوفرة")
+
+        # ─── 15M: تأكيد دقيق للدخول بعد الكسر (BOS) أو CISD — أحدهما إلزامي ───
         bos_ok,bos_level=find_bos(c15m,direction,20)
         cisd_ok,cisd_level=find_cisd(c15m,direction,15)
         if not (bos_ok or cisd_ok):
@@ -1304,8 +1345,9 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         if not tradable_ok:
             return reject(f"غير قابلة للتنفيذ فعلياً: {trad_reason}")
 
-        # ─── إصلاح #26: سيولة يومية غير مستهلكة (تعزيز فقط) ──────────────
-        daily_liq=find_unswept_daily_liquidity(sym,direction,cur)
+        # ─── إصلاح #26: سيولة يومية غير مستهلكة (تعزيز فقط، ومُعاد استخدامها
+        # من الفحص المسبق في إصلاح #31 بدل طلب شبكة مكرر — توفير موارد) ──
+        daily_liq=daily_liq_precheck
 
         # ─── درجة الثقة (لا نقاط ثابتة إطلاقاً) ──────
         score=0.0
@@ -1313,6 +1355,8 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         score+=round(fvg_retest_prec*14,1)
         if fib_ok:                 score+=round(fib_precision*0.12,1)
         if choch_ok:               score+=10
+        if bos_1h_ok:               score+=8
+        if bos_4h_ok:               score+=6
         if bos_ok:                 score+=9
         if cisd_ok:                score+=7
         if ob_1h:                  score+=8
@@ -1349,7 +1393,12 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
 
         # ─── تفسير لماذا ─────────────────────
         reasons=[]
-        reasons.append(f"4H: اتجاه {tr4h} (قوة {abs(trend_d):.2f}%)")
+        reasons.append(f"4H: اتجاه {tr4h} (قوة {abs(trend_d):.2f}%)" + (" | ⚠️ صفقة عكس الترند (انعكاس هيكلي مؤكد)" if counter_trend else ""))
+        htf_confirm=[]
+        if choch_ok: htf_confirm.append("CHoCh(1H)")
+        if bos_1h_ok: htf_confirm.append("BOS(1H)")
+        if bos_4h_ok: htf_confirm.append("BOS(4H)")
+        reasons.append("تأكيد هيكلي إلزامي: " + "+".join(htf_confirm))
         reasons.append("1H: سحب سيولة + FVG مُعاد اختباره (دقة {:.0f}%)".format(fvg_retest_prec*100))
         entry_confirm=[]
         if bos_ok: entry_confirm.append("BOS")
@@ -1397,6 +1446,9 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
             "fib_in_zone"  :fib_ok,
             "fib_precision":fib_precision,
             "choch"        :choch_ok,
+            "bos_1h"       :bos_1h_ok,
+            "bos_4h"       :bos_4h_ok,
+            "counter_trend":counter_trend,
             "bos"          :bos_ok,
             "cisd"         :cisd_ok,
             "brain_bonus"  :brain_bonus,
@@ -1600,6 +1652,15 @@ def run_scan():
     if ST['scanning']: return
     ST['scanning']=True; ST['scan_n']+=1
     sio.emit('state_update',get_st())
+    # إصلاح #31 (اقتصاد موارد): تخطّي الفحص بالكامل خارج جلستي لندن/نيويورك
+    # — صفر طلبات Binance بدل تضييعها ثم رفض كل عملة فردياً بعد الجلب.
+    _sess_now=get_session()
+    if _sess_now["session"] not in ("London","NY"):
+        elog(f"⏸️ خارج جلستي لندن/نيويورك (الجلسة الحالية: {_sess_now['session']}) — تخطّي الفحص لتوفير الموارد","info")
+        ST['last_scan']=datetime.now().strftime("%H:%M:%S")
+        ST['scanning']=False
+        sio.emit('state_update',get_st())
+        return
     elog("🔍 بدء الفحص...","info")
     try:
         syms=top_symbols(TOP_N); ST['top_symbols']=syms
