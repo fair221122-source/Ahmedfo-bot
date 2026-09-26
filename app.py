@@ -1287,7 +1287,13 @@ def find_breakout_retest(c1h, zone, direction):
     post=[cv for idx,cv in after if idx>breakout_idx]
     if not post: return True,False,breakout_idx,None,break_vol
 
-    tol=level*0.002
+    # إصلاح #34: كان الهامش رقماً ثابتاً (0.2%) بغض النظر عن تقلب العملة —
+    # شمعة الساعة الواحدة على عملات كريبتو متقلبة غالباً تتحرك أكثر من هذا
+    # الرقم، فكانت لمسات إعادة اختبار صحيحة فعلياً تُرفض لأنها "تجاوزت"
+    # هامشاً ضيقاً جداً وهمياً. الآن الهامش يتكيّف مع تقلب العملة نفسها عبر
+    # ATR (متوسط المدى الحقيقي) حتى لحظة الكسر، بحد أدنى 0.1% كصمام أمان.
+    atr_at_break=atr_calc(c1h[:breakout_idx+1])
+    tol=max(atr_at_break*0.5, level*0.001)
     retested=False
     for cv in post:
         touched=(cv['l']<=level+tol and cv['h']>=level-tol)
