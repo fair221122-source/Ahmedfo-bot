@@ -1307,11 +1307,10 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         if debug is not None: debug.append(f"{sym}: {reason}")
         return None
     try:
-        # ─── التداول فقط بجلستي لندن ونيويورك — يُفحص أولاً، قبل أي جلب
-        # بيانات، لتوفير طلبات Binance فعلياً خارج هذه الساعات ─────────
+        # ─── إصلاح #33 (بطلب صريح): الفحص يعمل في أي وقت الآن — الجلسة
+        # الرئيسية (لندن/نيويورك) لم تعد شرط رفض، فقط عامل تعزيز للسكور
+        # لاحقاً (راجع قسم درجة الثقة بالأسفل) ───────────────────────────
         sess=get_session()
-        if sess["session"] not in ("London","NY"):
-            return reject(f"خارج الجلسات الرئيسية (الجلسة الحالية: {sess['session']}) — التداول مقصور على لندن/نيويورك")
 
         # كل الاستراتيجية على فريم الساعة فقط (بطلب صريح) — طلب شبكة واحد
         # لكل عملة بدل 3، اقتصاد موارد حقيقي إضافي.
@@ -1391,6 +1390,7 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         if break_vr>=1.5:          score+=10               # زخم كسر قوي بالحجم
         elif break_vr>=1.2:        score+=5
         if sess["in_kz"]:          score+=10               # Kill Zone ضمن لندن/نيويورك
+        if sess["session"] in ("London","NY"):  score+=8    # إصلاح #33: جلسة رئيسية = تعزيز، وليس شرط رفض
         if cvd_data["score"]>60:   score+=8
         if abs(cor_btc)>0.7:       score+=5
         if 40<rsi_1h<60:           score+=5
@@ -1415,6 +1415,7 @@ def analyze(sym,btc_c,learned=None,debug=None,cvd_precomputed=None):
         reasons.append(f"وقف الخسارة {'تحت آخر قاع' if direction=='BUY' else 'فوق آخر قمة'} منذ الكسر")
         if break_vr>=1.2: reasons.append(f"حجم كسر قوي (×{break_vr})")
         if sess["in_kz"]: reasons.append(f"Kill Zone ({sess['session']})")
+        if sess["session"] in ("London","NY"): reasons.append(f"جلسة رئيسية ({sess['session']}) — تعزيز")
         if BRAIN_OK and learned and learned.get("total_trades",0)>=BRAIN_MIN_TRADES:
             reasons.append(f"تعلم تاريخي: {brain_bonus:+.1f} نقطة (من {learned.get('total_trades',0)} صفقة)")
         why=" | ".join(reasons)
@@ -1629,15 +1630,9 @@ def run_scan():
     if ST['scanning']: return
     ST['scanning']=True; ST['scan_n']+=1
     sio.emit('state_update',get_st())
-    # إصلاح #31 (اقتصاد موارد): تخطّي الفحص بالكامل خارج جلستي لندن/نيويورك
-    # — صفر طلبات Binance بدل تضييعها ثم رفض كل عملة فردياً بعد الجلب.
-    _sess_now=get_session()
-    if _sess_now["session"] not in ("London","NY"):
-        elog(f"⏸️ خارج جلستي لندن/نيويورك (الجلسة الحالية: {_sess_now['session']}) — تخطّي الفحص لتوفير الموارد","info")
-        ST['last_scan']=datetime.now().strftime("%H:%M:%S")
-        ST['scanning']=False
-        sio.emit('state_update',get_st())
-        return
+    # إصلاح #33 (بطلب صريح): الفحص يعمل في أي وقت الآن — لا تخطّي حسب
+    # الجلسة إطلاقاً. الجلسة الرئيسية (لندن/نيويورك) أصبحت عامل تعزيز
+    # للسكور داخل analyze() فقط، وليست شرط تشغيل للفحص بالكامل.
     elog("🔍 بدء الفحص...","info")
     try:
         syms=top_symbols(TOP_N); ST['top_symbols']=syms
